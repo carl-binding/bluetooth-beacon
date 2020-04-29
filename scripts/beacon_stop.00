@@ -1,0 +1,8 @@
+#!/bin/sh
+
+export BLUETOOTH_DEVICE=hci0
+
+sudo hciconfig $BLUETOOTH_DEVICE noleadv
+
+
+exit 0

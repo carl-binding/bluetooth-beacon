@@ -1,0 +1,21 @@
+#!/bin/sh
+
+## ok, this is a misnomer, as we are setting the enable bit to false, ie. disable
+if [ -z "$SET_ADV_ENABLE_CMD" ]; then
+    echo "missing SET_ADV_ENABLE_CMD env var"
+    exit -1
+fi  
+
+## echo $SET_ADV_ENABLE_CMD
+
+## bluetooth host controller interface
+BLUETOOTH_DEVICE=hci0
+
+## fix up the file /etc/sudoers properly to be able to run sudo without passwd prompt....
+
+sudo hcitool -i hci0 cmd $SET_ADV_ENABLE_CMD
+
+## noleadv: Disable LE advertising
+## sudo hciconfig $BLUETOOTH_DEVICE noleadv
+
+exit 0

@@ -1,0 +1,77 @@
+#!/bin/sh
+
+if [ -z "$BEACON_UUID" ]; then
+    echo "setting BEACON_UUID to default..."
+    export BEACON_UUID="93 48 59 7e 81 a2 11 ea 97 22 90 61 ae c6 7c 30"
+fi  
+
+
+#all values must be in hex form separated by spaces between every two hex digits
+export BLUETOOTH_DEVICE=hci0
+
+## https://www.bluetooth.com/specifications/assigned-numbers/company-identifiers/
+## Apple Inc ID, 4 bytes, LSB encoding of 0x004C
+export APPLE_ID="4C 00"
+
+## IBM Corporation. well, they paid me for some years...
+export IBM_ID="03 00"
+
+## Flags as per Supplement to the Bluetooth Core Specification
+## 1.3 Flags
+## LE General Discoverable Mode | BR/EDR Not Supported. Bit 37 of LMP Feature Mask Definitions (Page 0)
+## bit pos 1 & 2: 0x06
+## len (1) data type (1) value (1):  2 bytes long, data type == 01 == Flags, flag value == 06
+export ADV_DATA_TYPE_FLAGS="02 01 06"
+
+## Supplement of Bluetooth Core Specification, 1.4 Manufacturer specific data:
+## Advertisement len (1) byte | manufacturer-specific data flag (1) 0xFF | proprietary data in which
+## the first 2 octets must contain the Company Identifier Code followed by additional manufacturer specific data
+
+## Apple iBeacon prefix
+## Advertisement data type, manufacturer specific data format
+## https://os.mbed.com/blog/entry/BLE-Beacons-URIBeacon-AltBeacons-iBeacon/
+
+## proprietary iBeacon data:  company id (2) 0x4c 0x00 (Apple) | iBeacon type (1) == 0x02 | iBeacon data length (1) == 0x15 | UUID (16) | major (2) | minor (2) | TX power (1)
+
+## total advertisement len == 0x1A == 26 == adv len (1) | iBeacon prefix (4) | UUID (16) | major (2) | minor (2) | TX power (1)
+## iBeacon length == 0x15 == 21 == UUID(16) | MAJOR(2) | MINOR(2) | TX POWER(1)
+export APPLE_IBEACON_PREFIX="1a ff 4c 00 02 15"
+
+## the IBM_BEACON_PREFIX is not detected by my iBeacon scanner. it must be coming as an Apple beacon...
+export IBM_IBEACON_PREFIX="1a ff 03 00 02 15"
+
+## arbitrary major,minor values. each 2 bytes
+## LSB
+export MAJOR="01 00"
+export MINOR="01 00"
+
+## TX Power level, Supplement to the Bluetooth Core Specification, 1.5
+## 0xC5 == -59 (2's complement), power level, dBm
+export POWER="c5"
+
+## HCI commands have a 16 bit opcode: 6 bits of OGF, 10 bits of OCF
+## for LE Set Advertising Data we have OGF = 0x08 and OCF = 0x08
+## HOST CONTROLLER INTERFACE FUNCTIONAL SPECIFICATION
+## Vol 4, Part E, 7.8.7 LE Set Advertising Data command bluetooth core 5.2 specs pg 2487
+
+# opcode group field: LE commands
+export OGF="0x08"
+
+# opcode command field: LE set advertising data...
+export OCF="0x0008"
+
+echo $OGF $OCF $SIG_DATA_LEN $ADV_DATA_TYPE_FLAGS $APPLE_IBEACON_PREFIX $BEACON_UUID $MAJOR $MINOR $POWER
+
+## fix up the file /etc/sudoers properly to be able to run sudo without passwd prompt....
+
+sudo  hciconfig $BLUETOOTH_DEVICE up
+sudo  hciconfig $BLUETOOTH_DEVICE noleadv
+sudo  hciconfig $BLUETOOTH_DEVICE leadv 0
+
+## 0x1e == 30 == significant length of data
+## the overall length of the advertising data must be 31 bytes, thus 00 padding towards end...
+export SIG_DATA_LEN=1e
+
+sudo  hcitool -i hci0 cmd $OGF $OCF $SIG_DATA_LEN $ADV_DATA_TYPE_FLAGS $APPLE_IBEACON_PREFIX $BEACON_UUID $MAJOR $MINOR $POWER 00
+
+exit 0

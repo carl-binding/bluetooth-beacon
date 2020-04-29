@@ -1,0 +1,84 @@
+HCI sniffer - Bluetooth packet analyzer ver 5.37
+btsnoop version: 1 datalink type: 1002
+< HCI Command: LE Set Scan Parameters (0x08|0x000b) plen 7
+    type 0x01 (active)
+    interval 10.000ms window 10.000ms
+    own address: 0x00 (Public) policy: All
+> HCI Event: Command Complete (0x0e) plen 4
+    LE Set Scan Parameters (0x08|0x000b) ncmd 1
+    status 0x00
+< HCI Command: LE Set Scan Enable (0x08|0x000c) plen 2
+    value 0x01 (scanning enabled)
+    filter duplicates 0x01 (enabled)
+> HCI Event: Command Complete (0x0e) plen 4
+    LE Set Scan Enable (0x08|0x000c) ncmd 1
+    status 0x00
+> HCI Event: LE Meta Event (0x3e) plen 30
+    LE Advertising Report
+      ADV_IND - Connectable undirected advertising (0)
+      bdaddr 6B:62:C7:19:60:09 (Random)
+      Flags: 0x1a
+      TX power level: 12
+      Unknown type 0xff with 10 bytes data
+      RSSI: -59
+> HCI Event: LE Meta Event (0x3e) plen 12
+    LE Advertising Report
+      SCAN_RSP - Scan Response (4)
+      bdaddr 6B:62:C7:19:60:09 (Random)
+      RSSI: -59
+> HCI Event: LE Meta Event (0x3e) plen 40
+    LE Advertising Report
+      ADV_NONCONN_IND - Non connectable undirected advertising (3)
+      bdaddr 78:BD:BC:0B:B6:39 (Public)
+      Unknown type 0xff with 26 bytes data
+      RSSI: -86
+> HCI Event: LE Meta Event (0x3e) plen 29
+    LE Advertising Report
+      ADV_IND - Connectable undirected advertising (0)
+      bdaddr 5D:4A:91:0F:87:0F (Random)
+      Flags: 0x1a
+      TX power level: 12
+      Unknown type 0xff with 9 bytes data
+      RSSI: -91
+> HCI Event: LE Meta Event (0x3e) plen 43
+    LE Advertising Report
+      ADV_NONCONN_IND - Non connectable undirected advertising (3)
+      bdaddr 90:61:AE:C6:7C:34 (Public)
+      Flags: 0x1a
+      Complete service classes: 0x6ffd
+      Unknown type 0x16 with 18 bytes data
+      Unknown type 0xb8 with 10 bytes data
+      RSSI: -40
+> HCI Event: LE Meta Event (0x3e) plen 12
+    LE Advertising Report
+      SCAN_RSP - Scan Response (4)
+      bdaddr 5D:4A:91:0F:87:0F (Random)
+      RSSI: -88
+> HCI Event: LE Meta Event (0x3e) plen 42
+    LE Advertising Report
+      ADV_IND - Connectable undirected advertising (0)
+      bdaddr 84:EE:03:90:41:1D (Public)
+      Flags: 0x06
+      Unknown type 0xff with 25 bytes data
+      RSSI: -92
+> HCI Event: LE Meta Event (0x3e) plen 30
+    LE Advertising Report
+      ADV_IND - Connectable undirected advertising (0)
+      bdaddr 46:58:72:29:45:A7 (Random)
+      Flags: 0x1a
+      TX power level: 12
+      Unknown type 0xff with 10 bytes data
+      RSSI: -101
+> HCI Event: LE Meta Event (0x3e) plen 12
+    LE Advertising Report
+      SCAN_RSP - Scan Response (4)
+      bdaddr 46:58:72:29:45:A7 (Random)
+      RSSI: -90
+> HCI Event: LE Meta Event (0x3e) plen 29
+    LE Advertising Report
+      ADV_IND - Connectable undirected advertising (0)
+      bdaddr 75:C7:3A:B9:82:1A (Random)
+      Flags: 0x1a
+      TX power level: 12
+      Unknown type 0xff with 9 bytes data
+      RSSI: -91

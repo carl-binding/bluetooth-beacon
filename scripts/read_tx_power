@@ -1,0 +1,20 @@
+#!/bin/sh
+
+if [ -z "$READ_TX_POWER_CMD" ]; then
+    echo "missing READ_TX_POWER_CMD env var"
+    exit -1
+fi 
+
+## bluetooth host controller interface
+BLUETOOTH_DEVICE=hci0
+
+## fix up the file /etc/sudoers properly to be able to run sudo without passwd prompt....
+
+sudo  hciconfig $BLUETOOTH_DEVICE up
+
+## noleadv: Disable LE advertising for sure
+sudo  hciconfig $BLUETOOTH_DEVICE noleadv
+
+sudo  hcitool -i hci0 cmd $READ_TX_POWER_CMD
+
+exit 0

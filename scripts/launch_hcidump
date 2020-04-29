@@ -1,0 +1,27 @@
+#!/bin/sh
+
+if [ -z "$HCI_DUMP_TRACE_FN" ]; then
+    echo "missing HCI_DUMP_TRACE_FN env var, using default"
+    export HCI_DUMP_TRACE_FN="/tmp/hcidump_beacon.trace"
+fi 
+
+## bluetooth host controller interface
+BLUETOOTH_DEVICE=hci0
+
+## put hci into a clean state...
+sudo hciconfig $BLUETOOTH_DEVICE down
+sudo hciconfig $BLUETOOTH_DEVICE up
+
+## echo "launching hcidump -w " $HCI_DUMP_TRACE_FN
+
+sudo hcidump -i $BLUETOOTH_DEVICE -w $HCI_DUMP_TRACE_FN hci > /dev/null &
+HCI_DUMP_PID=$!
+
+## echo "launching hcitool lescan"
+
+sudo hcitool -i $BLUETOOTH_DEVICE lescan --duplicates > /dev/null &
+HCI_TOOL_PID=$!
+
+echo "pids: " $HCI_DUMP_PID  $HCI_TOOL_PID
+
+echo "launch_hcidump done"

@@ -1,0 +1,43 @@
+#!/bin/sh
+
+if [ -z "$SET_ADV_PARAMS_CMD" ]; then
+    echo "missing SET_ADV_PARAMS_CMD env var"
+    exit -1
+fi 
+
+if [ -z "$SET_ADV_DATA_CMD" ]; then
+    echo "missing SET_ADV_DATA_CMD env var"
+    exit -1
+fi 
+
+if [ -z "$SET_ADV_ENABLE_CMD" ]; then
+    echo "missing SET_ADV_ENABLE_CMD env var"
+    exit -1
+fi  
+
+## echo $SET_ADV_PARAMS_CMD
+## echo $SET_ADV_DATA_CMD
+## echo $SET_ADV_ENABLE_CMD
+
+## bluetooth host controller interface
+BLUETOOTH_DEVICE=hci0
+
+## fix up the file /etc/sudoers properly to be able to run sudo without passwd prompt....
+
+sudo  hciconfig $BLUETOOTH_DEVICE up
+
+## noleadv: Disable LE advertising for sure
+sudo  hciconfig $BLUETOOTH_DEVICE noleadv
+
+## leadv [type] Enable LE advertising, 
+##		0 - Connectable undirected advertising (default)
+##		3 - Non connectable undirected advertising
+## sudo  hciconfig $BLUETOOTH_DEVICE leadv 0
+
+## we can set advertising parameters only when device not already advertising.
+sudo  hcitool -i hci0 cmd $SET_ADV_PARAMS_CMD
+
+sudo  hcitool -i hci0 cmd $SET_ADV_DATA_CMD
+sudo  hcitool -i hci0 cmd $SET_ADV_ENABLE_CMD
+
+exit 0

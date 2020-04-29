@@ -1,0 +1,47 @@
+#!/bin/bash
+
+## to list relevant processes in case of need:
+## ps -aux | grep hci
+
+## from the Java world we ran a script which started two sudo processes.
+## one process runs hcitool to enable lescan
+## the second process runs hcidump to trace incoming advertisements
+## we need to kill the sudo processes AND their children...
+
+## export HCI_DUMP_PID=10013
+## export HCI_TOOL_PID=10014
+
+if [ ! -z "$HCI_DUMP_PID" ]; then
+
+	## -o pid to get only the PID, --ppid to get children of PID 
+	## --noheader to suppress ps' header.
+	
+	## export CMD='/bin/ps -o pid --ppid 6787 --noheader'
+	GET_PPID_CMD="/bin/ps -o pid --ppid $HCI_DUMP_PID --noheader"
+	
+	## to execute env var as command use back-quote...
+	CHILD_PID=`$GET_PPID_CMD`
+	## echo "HCI_DUMP CHILD_PID: " $CHILD_PID
+	
+	sudo kill -9 $CHILD_PID
+	echo "killed child " $CHILD_PID
+	
+	sudo kill -9 $HCI_DUMP_PID
+	echo "killed " $HCI_DUMP_PID	
+	
+fi 
+
+if [ ! -z "$HCI_TOOL_PID" ]; then
+
+	GET_PPID_CMD="/bin/ps -o pid --ppid $HCI_TOOL_PID --noheader"
+		
+	## to execute env var as command use back-quote...
+	CHILD_PID=`$GET_PPID_CMD`
+	## echo "HCI_TOOL CHILD_PID: " $CHILD_PID
+
+	sudo kill -9 $CHILD_PID
+	echo "killed child " $CHILD_PID
+	
+	sudo kill -9 $HCI_TOOL_PID
+	echo "killed " $HCI_TOOL_PID
+fi 
