@@ -29,7 +29,6 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.Properties;
 import java.util.Random;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.crypto.BadPaddingException;
@@ -44,20 +43,17 @@ import at.favre.lib.crypto.HKDF;
 
 public class Crypto {
 	
-	
 	static private final String KEY_STORE_FN = "keystore.bin";
 	
-	static Logger logger = Logger.getLogger(Crypto.class.getName());
-	
+	static Logger logger = Beacon.getLogger();
+		
 	static private KeyStore keyStore = null;
 	
 	static private void init() {
 		
 		if ( keyStore != null)
 			return;
-		
-		logger.setLevel( Level.ALL);
-		
+				
 		String cwd = System. getProperty("user.dir");
 		String keyStoreFileName = cwd + File.separator + KEY_STORE_FN;
 		
@@ -95,7 +91,7 @@ public class Crypto {
 	 * @return key as byte array.
 	 */
 	static byte [] genRandomKey() {
-		Random rd = new Random( 1313);
+		Random rd = new Random( );
 	    byte[] arr = new byte[KEY_LEN];
 	    rd.nextBytes(arr);
 	    return arr;
@@ -190,9 +186,9 @@ public class Crypto {
 	 * @return the index of the 10 minutes interval on the given day
 	 */
 	 static char getTimeIntervalNumber( long dayNumber) {
-		Date now = new Date();
+		long now = System.currentTimeMillis();
 		long startOfDay = dayNumber * 60 * 60 * 24; // seconds
-		long secondsOfDay = (now.getTime()/1000) - startOfDay;
+		long secondsOfDay = (now/1000) - startOfDay;
 		long nbr = secondsOfDay / ( 60 * 10);
 		return (char) nbr;
 	}
@@ -288,7 +284,7 @@ public class Crypto {
 		Crypto.init();
 		
 		// current interval nbr of 10 minutes intervals since EPOCH
-		final long currentIntvlNbr = getENIntervalNumber( new Date().getTime()/1000);
+		final long currentIntvlNbr = getENIntervalNumber( System.currentTimeMillis()/1000);
 		
 		// starting interval nbr of current rolling-period, i.e start of day
 		long currentKeyGenIntervalNbr = (long) (Math.floor( (double) currentIntvlNbr / (double) EKRollingPeriod) * EKRollingPeriod);
@@ -396,7 +392,7 @@ public class Crypto {
 		
 		Crypto.init();
 		
-		final long now = new Date().getTime()/1000; // secs
+		final long now = System.currentTimeMillis()/1000; // secs
 		final long enin = getENIntervalNumber( now);
 		
 		byte padding[] = new byte[16];

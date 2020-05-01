@@ -1,0 +1,22 @@
+#!/bin/sh
+
+## SET_RAND_ADDR_CMD="0x08 0x0005 89 1a d9 05 a1 38"
+
+if [ -z "$SET_RAND_ADDR_CMD" ]; then
+    echo "missing SET_RAND_ADDR_CMD env var"
+    exit -1
+fi 
+
+## bluetooth host controller interface
+BLUETOOTH_DEVICE=hci0
+
+## fix up the file /etc/sudoers properly to be able to run sudo without passwd prompt....
+
+sudo  hciconfig $BLUETOOTH_DEVICE up
+
+## noleadv: Disable LE advertising for sure
+sudo  hciconfig $BLUETOOTH_DEVICE noleadv
+
+sudo  hcitool -i hci0 cmd $SET_RAND_ADDR_CMD
+
+exit 0

@@ -18,16 +18,12 @@ package ch.binding.beacon.hci;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
-import java.util.logging.Level;
+
 import java.util.logging.Logger;
 
-import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_NONCONN_IND_Report;
-import ch.binding.beacon.hci.LE_AdvertisingReport.AdvertisingReport;
-import ch.binding.beacon.hci.LE_AdvertisingReport.ContactDetectionServiceReport;
+import ch.binding.beacon.Beacon;
+
 
 /***
  * parsing the output of hcidump command line tool. Gross interface into the BLE world.
@@ -37,11 +33,7 @@ import ch.binding.beacon.hci.LE_AdvertisingReport.ContactDetectionServiceReport;
  */
 public class HCIParser {
 	
-static Logger logger = Logger.getLogger(HCIParser.class.getName());
-	
-	static {
-		logger.setLevel( Level.ALL);
-	}
+	static Logger logger = Beacon.getLogger();
 	
 	public static final int BT_ADDR_SIZE = 0x06; // nbr of bytes
 	
@@ -58,58 +50,6 @@ static Logger logger = Logger.getLogger(HCIParser.class.getName());
 	public static final int HCI_ASYNC_DATA = 0x02;
 	public static final int HCI_SYNC_DATA = 0x03;
 	public static final int HCI_EVENT = 0x04;
-	
-	/************************** event codes ***********************************************/
-	/**
-	 * Host Controller Interface
-	 * PART E: HOST CONTROLLER
-	 * INTERFACE FUNCTIONAL SPECIFICATION
-	 * 7 HCI COMMANDS AND EVENTS
-	 */
-	
-	// section 7.7 Events
-	public static final int HCI_Inquiry_Complete = 0x01;
-	public static final int HCI_Inquiry_Result = 0x02;
-	public static final int HCI_Connection_Complete = 0x03;
-	public static final int HCI_Connection_Request = 0x04;
-	public static final int HCI_Disconnection_Complete = 0x05;
-	public static final int HCI_Authentication_Complete = 0x06;
-	public static final int HCI_Remote_Name_Request_Complete = 0x07;
-	public static final int HCI_Encryption_Change = 0x08;
-	public static final int HCI_Change_Connection_Link_Key_Complete = 0x09;
-	public static final int HCI_Master_Link_Key_Complete = 0x0A;
-	public static final int HCI_Read_Remote_Supported_Features_Complete = 0x0B;
-	public static final int HCI_Read_Remote_Version_Information_Complete = 0x0C;
-	public static final int HCI_QoS_Setup_Complete = 0x0D;
-	public static final int HCI_Command_Complete = 0x0E;
-	// TBD
-	
-	// 7.7.65 LE Meta event
-	public static final int LE_META_EVENT = 0x3E;
-	
-	/*************************** Meta Event sub-event type codes  ************************/
-		
-	// 7.7.65.1 LE Connection Complete event
-	public static final int HCI_LE_Connection_Complete = 0x01;
-	
-	// 7.7.65.2 LE Advertising Report event
-	public static final int HCI_LE_Advertising_Report = 0x02;
-	
-	// 7.7.65.3 LE Connection Update Complete event
-	public static final int HCI_LE_Connection_Update_Complete = 0x03;
-	
-	// 7.7.65.4 LE Read Remote Features Complete event
-	public static final int HCI_LE_Read_Remote_Features_Complete = 0x04;
-	
-	// 7.7.65.5 LE Long Term Key Request event
-	public static final int HCI_LE_Long_Term_Key_Request = 0x05;
-	
-	// TBD: additional sub-event codes as needed
-	
-	// 7.7.65.34 LE BIGInfo Advertising Report event
-	public static final int HCI_LE_BIGInfo_Advertising_Report = 0x22;
-	
-	
 		
 	
 	private static byte [] readBytes( final FileInputStream in, final long nbrBytes) throws IOException {
@@ -188,18 +128,24 @@ static Logger logger = Logger.getLogger(HCIParser.class.getName());
 		HCI_Event hciEvent = new HCI_Event( data, tsOfCapture);
 				
 		switch ( hciEvent.eventCode) {
-		case LE_META_EVENT:	
-			LE_MetaEvent metaEvent = new LE_MetaEvent( hciEvent);
-			LE_MetaEvent metaSubEvent = metaEvent.parse();
-			logger.info( metaSubEvent.toString());
-			return metaSubEvent;
-		case HCI_Command_Complete:
+		case HCI_Event.HCI_Meta_Event:	
+			LE_MetaEvent metaEvent = new LE_MetaEvent( hciEvent).parse();
+		
+			// logger.info( metaSubEvent.toString());
+			
+			return metaEvent;
+			
+		case HCI_Event.HCI_Command_Complete:
 			HCI_CommandComplete cc = new HCI_CommandComplete( hciEvent);
-			logger.info( cc.toString());
+			
+			// logger.info( cc.toString());
+			
 			return cc;
 		// TBD
 		default:
-			throw new Exception( "unhandled HCI event code");
+			logger.severe("unhandled HCI event code: " + Byte.toString( hciEvent.eventCode));
+			System.exit( -1);
+			return null;
 		} 
 	}
 
@@ -278,7 +224,7 @@ static Logger logger = Logger.getLogger(HCIParser.class.getName());
 			long inclLen = getInt32( includedLength);
 			
 			if ( origLen != inclLen) {
-				throw new IOException( "original length != included length");
+				logger.warning( String.format( "original length != included length %d %d", origLen, inclLen));
 			}
 			
 			byte packetFlags[] = readBytes( in, 4);
@@ -297,6 +243,11 @@ static Logger logger = Logger.getLogger(HCIParser.class.getName());
 			// The Datalink Type field of the file header can be used to determine how to decode the datalink header. 
 			// The length of the Packet Data field is given in the Included Length field.
 			byte packetData[] = readBytes( in, inclLen);
+			
+			if ( packetData == null || packetData.length == 0) {
+				logger.warning( "empty packetData");
+				continue;
+			}
 			
 			if ( contains( packetData[0], pduTypes)) {
 				
@@ -324,7 +275,7 @@ static Logger logger = Logger.getLogger(HCIParser.class.getName());
 					break;
 				case HCI_ASYNC_DATA:
 				case HCI_SYNC_DATA:
-					logger.info( "unsupported HCI PDU type");
+					logger.info( "unsupported HCI PDU type: " + Byte.toString( packetData[0]));
 					break;
 				default:
 					throw new IOException( "unknown HCI PDU type");

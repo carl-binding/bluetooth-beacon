@@ -87,6 +87,7 @@ public class HCI_CommandComplete extends HCI_Event {
 			case HCI_Command.HCI_LE_Set_Advertising_Enable_OCF:
 			case HCI_Command.HCI_LE_Set_Advertising_Data_OCF:
 			case HCI_Command.HCI_LE_Set_Advertising_Parameters_OCF:
+			case HCI_Command.HCI_LE_Set_Random_Address_OCF:
 				assert( this.returnParameters.length == 1);
 				/*
 				 * BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E page 2485
@@ -97,15 +98,17 @@ public class HCI_CommandComplete extends HCI_Event {
 				 *	0x01 to 0xFF HCI_LE_Set_Advertising_Parameters command failed. See [Vol 1] Part F, Controller Error Codes for a list of error codes and descriptions.
 				 */
 				return this.returnParameters[0];
+				
 			case HCI_Command.HCI_LE_Read_Advertising_Physical_Channel_Tx_Power_OCF:
 				// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E	page 2486
 				assert( this.returnParameters.length == 2);
 				return this.returnParameters[0];
+			
 			default:
-				throw new Exception( "unhandled OCF");
+				throw new Exception( "unhandled OCF: " + Short.toString( this.OCF));
 			}
 			
-		default: throw new Exception( "unhandled OGF");
+		default: throw new Exception( "unhandled OGF: " + Byte.toString( this.OGF));
 		}
 	}
 	

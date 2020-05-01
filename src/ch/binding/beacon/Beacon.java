@@ -18,21 +18,12 @@ package ch.binding.beacon;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.Date;
-import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Timer;
@@ -44,10 +35,14 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
+import ch.binding.beacon.db.SQLiteIDStore;
 import ch.binding.beacon.hci.HCIParser;
 import ch.binding.beacon.hci.HCI_Command;
 import ch.binding.beacon.hci.HCI_CommandComplete;
+import ch.binding.beacon.hci.HCI_ConnectionComplete;
 import ch.binding.beacon.hci.HCI_EventHandler;
+import ch.binding.beacon.hci.HCI_InquiryComplete;
+import ch.binding.beacon.hci.HCI_InquiryResult;
 import ch.binding.beacon.hci.HCI_PDU;
 import ch.binding.beacon.hci.HCI_Event;
 import ch.binding.beacon.hci.HCI_PDU_Handler;
@@ -56,20 +51,24 @@ import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_NONCONN_IND_Report;
 import ch.binding.beacon.hci.LE_AdvertisingReport.AdvertisingReport;
 import ch.binding.beacon.hci.LE_AdvertisingReport.ContactDetectionServiceReport;
 
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
 
-public class Beacon implements HCI_PDU_Handler {
+public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	
 	/***
 	 * file name for properties
 	 */
 	static final String PROPERTIES_FILE_NAME = "beacon.properties";
+	
+	static final String DB_FN = "/home/carl/workspace/beacon/sqlite/proximity_id_store.db";
 	
 	/***
 	 * we save output of hcidump into a file when scanning for other beacons
@@ -92,17 +91,52 @@ public class Beacon implements HCI_PDU_Handler {
 	
 	// public static final String APPLE_IBEACON_TX_POWER = "c5";
 	
+	// when sending out an Apple iBeacon, we use the rolling proximity ID as payload.
+	enum AppType { I_BEACON, APPLE_GOOGLE_CONTACT_TRACING};
+	
+	// we can switch between Apple iBeacon format and the Apple & Google Exposure Notification formats
+	final private AppType appType = AppType.I_BEACON; // APPLE_GOOGLE_CONTACT_TRACING;
+	
+	AppType getAppType() {
+		return this.appType;
+	}
+	
+	/***
+	 * to convert from dBm into mW
+	 * @param dbm power in dBm
+	 * @return power in milli-watt
+	 */
+	public static double dBm2mW( double dbm) {
+		return Math.pow(10, dbm/10.0);
+	}
+	
+	/***
+	 * 
+	 * @param mw power in milli-watt
+	 * @return power in dBm
+	 */
+	public static double mW2dBm( double mw) {
+		return 10.0 * Math.log10(mw);
+	}
+	
+	/***
+	 * to enable/disable usage of BT random addresses
+	 */
+	private boolean useRandomAddr = true;
+	
+	boolean useRandomAddr() {
+		return this.useRandomAddr;
+	}
+	
 	// we need to read the TX Power from the HCI BLE world. which is of course painful using hcitools & friends.
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E	page 2486
 	// 7.8.6 LE Read Advertising Physical Channel Tx Power command
 	// Range: -127 to 20
+	// the value to use is *not* the raw sending power, but the sender's power 1 m away from the antenna...
 	static int hciTxPower = Integer.MAX_VALUE;		
 	
 	// exposure notification Google & Apple
 	
-	// TBD: this is probably not the right way, but what do I know about BLE?
-	// public static final byte EXPOSURE_NOTIFICATION_TX_POWER = (byte) 0xC5;
-		
 	public static final int CONTACT_TRACING_ADVERTISING_INTERVAL = 200; // msecs
 	
 	/***
@@ -138,6 +172,17 @@ public class Beacon implements HCI_PDU_Handler {
 		this.state = s;
 	}
 	
+	// flag to indicate if BT addr and rolling proximity ID are to be renewed.
+	private boolean changeAddressFlag = false;
+	
+	public synchronized void setChangeAddressFlag( boolean flag) {
+		this.changeAddressFlag = flag;
+	}
+	
+	public synchronized boolean getChangeAddressFlag() {
+		return this.changeAddressFlag;
+	}
+	
 	/***
 	 * period of beacon cycle.
 	 */
@@ -156,20 +201,35 @@ public class Beacon implements HCI_PDU_Handler {
 	private static final long BEACON_SCANNING_DURATION = 10*1000;    // msecs
 	
 	
-	/***
-	 * duration of idling phase. milliseconds
-	 * 
-	 */
-	private static final long BEACON_IDLE_DURATION = BEACON_PERIOD-BEACON_ADVERTISING_DURATION-BEACON_SCANNING_DURATION;
+	// variables so we can use properties...
+	private static long beaconPeriod = BEACON_PERIOD;
 	
+	private static long beaconAdvertisingDuration = BEACON_ADVERTISING_DURATION;
+	private static long beaconScanningDuration = BEACON_SCANNING_DURATION;
 	
+	private static long getBeaconPeriod() {
+		return beaconPeriod;
+	}
+	
+	private static long getBeaconAdvertisingDuration() {
+		return beaconAdvertisingDuration;
+	}
+	
+	private static long getBeaconScanningDuration() {
+		return beaconScanningDuration;
+	}
+	
+	private static long getBeaconIdleDuration() {
+		return beaconPeriod - beaconAdvertisingDuration - beaconScanningDuration;
+	}
 	
 	/***
 	 * the rolling proximity ID shall be changed once so often. The specs link the
 	 * change to a change of BLE (random) address. We don't do this for now and use
 	 * the fixed BT_ADDR of the Linux box. But we change the rolling-proximity-ID
 	 * using this interval
-	 * 10 minutes
+	 * 
+	 * milli-secs
 	 */
 	private static final long ROLLING_PROXIMITY_INTERVAL = 10*60*1000; // msecs
 		
@@ -193,18 +253,18 @@ public class Beacon implements HCI_PDU_Handler {
 	/***
 	 * 
 	 * @param arr
-	 * @param msb: most-significant-byte first or least-significant-byte first...
+	 * @param reverseOrder: most-significant-byte first or least-significant-byte first...
 	 * @param spaceSeparated: if true, insert spaces between hex-digits of bytes.
 	 * @return hex representation of array data, space separated
 	 */
-	public static String byteArrToHex( byte [] arr, boolean msb, boolean withSpaces) {
+	public static String byteArrToHex( byte [] arr, boolean reverseOrder, boolean withSpaces) {
 		StringBuilder sb = new StringBuilder();
 		for (int i = 0; i < arr.length; i++) {
 			
             if ( withSpaces && i > 0)
             	sb.append( " ");
            
-            if ( msb) {
+            if ( reverseOrder) {
             	sb.append( String.format("%02x", arr[i]));
             } else {
             	sb.append( String.format("%02x", arr[arr.length-1-i]));
@@ -236,6 +296,8 @@ public class Beacon implements HCI_PDU_Handler {
 	//  bit pos 1 & 2: 0x06
 	//  len (1) data type (1) value (1):  2 bytes long, data type == 01 == Flags, flag value == 06
 	private final static String IBEACON_ADV_DATA_TYPE_FLAGS="02 01 06";
+
+	public static final String LOG_FILE_NAME = "/tmp/beacon_log.txt";
 	
 	/***
 	 * convert a signed Java integer value into an 8 bit two's complement positive Java integer.
@@ -259,6 +321,17 @@ public class Beacon implements HCI_PDU_Handler {
 		assert( ui >= 0 && ui <= 0xFF);
 		
 		return ui;
+	}
+	
+	public static String getSetRandomBTAddrCmd( byte [] btRandomAddr) {
+		StringBuffer sb = new StringBuffer();
+		sb.append( String.format( "0x%02x 0x%04x ", HCI_Command.HCI_LE_Controller_OGF, HCI_Command.HCI_LE_Set_Random_Address_OCF));
+		
+		// space separated, unchanged byte order. LSB first
+		String addrStr = Beacon.byteArrToHex( btRandomAddr, true, true);
+		sb.append( addrStr);
+		
+		return sb.toString();
 	}
 	
 	/**
@@ -304,7 +377,7 @@ public class Beacon implements HCI_PDU_Handler {
 	
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E,	page 2482
 	// 7.8.5 LE Set Advertising Parameters command
-	private static String getIBeaconSetAdvertisementParametersCommand() {
+	private static String getIBeaconSetAdvertisementParametersCommand( boolean useRandomAddr) {
 		StringBuffer sb = new StringBuffer();
 		sb.append( String.format( "0x%02x 0x%04x ", HCI_Command.HCI_LE_Controller_OGF, HCI_Command.HCI_LE_Set_Advertising_Parameters_OCF));
 		
@@ -312,7 +385,10 @@ public class Beacon implements HCI_PDU_Handler {
 		sb.append( "a0 00 ");  // Advertising_Interval_Max:	Size: 2 octets
 		
 		sb.append( String.format( "%02x ", ADV_NONCONN_IND));     // Advertising_Type:	Size: 1 octet
-		sb.append( String.format( "%02x ", Own_Address_Type_Public_Device_Address));     // Own_Address_Type:	Size: 1 octet
+		
+		final byte ownAddrType = useRandomAddr?Beacon.Own_Address_Type_Random_Device_Address:Own_Address_Type_Public_Device_Address;
+		
+		sb.append( String.format( "%02x ", ownAddrType));                                // Own_Address_Type:	Size: 1 octet
 		sb.append( String.format( "%02x ", Own_Address_Type_Public_Device_Address));     // Peer_Address_Type: Size: 1 octet
 		
 		sb.append( "00 00 00 00 00 00 "); // Peer_Address: Size: 6 octets
@@ -334,7 +410,7 @@ public class Beacon implements HCI_PDU_Handler {
 	}
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E,	page 2482
 	// 7.8.5 LE Set Advertising Parameters command
-	private static String getContactTracingSetAdvertisingParametersCommand() {
+	private static String getContactTracingSetAdvertisingParametersCommand( boolean useRandomAddr) {
 		StringBuffer sb = new StringBuffer();
 		sb.append( String.format( "%02x %04x ", HCI_Command.HCI_LE_Controller_OGF, HCI_Command.HCI_LE_Set_Advertising_Parameters_OCF));
 		
@@ -352,7 +428,10 @@ public class Beacon implements HCI_PDU_Handler {
 		// 0x03 Non connectable undirected advertising (ADV_NONCONN_IND)
 		sb.append( String.format( "%02x ", ADV_NONCONN_IND));    // Advertising_Type:	Size: 1 octet
 		
-		sb.append( String.format( "%02x ", Own_Address_Type_Public_Device_Address));     // Own_Address_Type:	Size: 1 octet
+		
+		final byte ownAddrType = useRandomAddr?Beacon.Own_Address_Type_Random_Device_Address:Own_Address_Type_Public_Device_Address;
+		
+		sb.append( String.format( "%02x ", ownAddrType));     							 // Own_Address_Type:	Size: 1 octet
 		sb.append( String.format( "%02x ", Own_Address_Type_Public_Device_Address));     // Peer_Address_Type: Size: 1 octet
 		
 		sb.append( "00 00 00 00 00 00 "); // Peer_Address: Size: 6 octets
@@ -461,15 +540,39 @@ public class Beacon implements HCI_PDU_Handler {
 	}
 	
 	static Logger logger = Logger.getLogger(Beacon.class.getName());
+
+	// properties for the application
+	private static Properties appProps;
+	
+	public static Properties getProps() {
+		return appProps;
+	}
+	
+	public static Logger getLogger() {
+		return logger;
+	}
 	
 	static {
+		
+		try {
+			
+			FileHandler fh = new FileHandler( Beacon.LOG_FILE_NAME);
+			logger.addHandler( fh);
+			SimpleFormatter formatter = new SimpleFormatter();  
+	        fh.setFormatter(formatter);  
+	        
+		} catch (SecurityException | IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}   
+		
 		logger.setLevel( Level.ALL);
 	}
 	
 	
 	
 	/***
-	 * to parse HCI events and handle the status value for HCI_Events we get back from hcitool. ugly, ugly.
+	 * to parse HCI events and testing the status value for HCI_Events we get back from hcitool.
 	 * @param hciEvent
 	 */
 	private static HCI_Event handleHCIEvent( final String hciEvent) {
@@ -483,7 +586,11 @@ public class Beacon implements HCI_PDU_Handler {
 					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI Event: %s", ec.code, ec.name, hciEvt.toString()));
 				}
 				return hciEvt;
+			} else if ( hciEvt instanceof HCI_InquiryComplete) {
+			} else if ( hciEvt instanceof HCI_InquiryResult) {
+			} else if ( hciEvt instanceof HCI_ConnectionComplete) {
 			} else {
+				logger.severe( "HCI_Event: " + hciEvt.toString());
 				logger.severe( "unhandled HCI Event in HCI response");
 			}
 		} catch (Exception e) {
@@ -522,7 +629,8 @@ public class Beacon implements HCI_PDU_Handler {
 			StringBuffer sb = null;				
 			
 			while ((s = stdInput.readLine()) != null) {
-				System.err.println(s);
+				
+				System.err.println( "stdout: " + s);
 
 				// responses from hcitool start with an "> HCI Event:" string, followed by some length indication 
 				// HCI Events are split across two lines... it seems
@@ -547,7 +655,15 @@ public class Beacon implements HCI_PDU_Handler {
 			}
 			
 			while ((s = stdError.readLine()) != null) {
-               System.err.println( s);
+				
+               System.err.println( "stderr: " + s);
+               
+               if ( s.contains( "Connection timed out") ||
+            		s.contains( "Network is down")) {
+            	   logger.severe( "BLE hardware hung-up? " + s);
+            	   System.exit( -1);
+               }
+               
                if ( lineHandler != null)
             	   lineHandler.onStdErrLine( s);
 			}	
@@ -562,9 +678,73 @@ public class Beacon implements HCI_PDU_Handler {
 	}
 	
 	
-	public Beacon() {
+	private ProximityIDStore idStore = null;
+	
+	public Beacon() throws Exception {
+		super();
+		this.idStore = new SQLiteIDStore( Beacon.DB_FN);
 	}
 
+	private static byte [] getBTRandomNonResolvableAddress() {
+		Random rd = new Random();
+		byte[] arr = new byte[HCIParser.BT_ADDR_SIZE];
+		rd.nextBytes(arr);
+		
+		// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 6, Part B	page 2859
+		// addresses are LSB..MSB and bit 46:47 are 00. which are the lowest 2 bits of the last byte...
+		// the mask thus is 0xFC == 1111 1100 = 15 12 = 0xF 0xC
+		
+		arr[HCIParser.BT_ADDR_SIZE-1] = (byte) (arr[HCIParser.BT_ADDR_SIZE-1] & 0xFC);
+		
+		return arr;
+	}
+	
+	@Override
+	public boolean onEvent( HCI_Event evt) {
+		if ( evt instanceof HCI_CommandComplete) {
+			byte status;
+			try {
+				status = ((HCI_CommandComplete) evt).getStatus();
+				if ( status != 0x00) {
+					// failure.
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+		return true;
+	}
+		
+	/***
+	 * almost periodically, we change the blue-tooth address of the device and the proximity identifier.
+	 * this can only be done when BLE device is idle.
+	 */
+	void changeBTAddress() {
+		
+		// if ( this.beacon.getAppType() == AppType.APPLE_GOOGLE_CONTACT_TRACING ) {
+		if ( this.useRandomAddr()) {
+			// try to change the BT address
+			
+			// the address is LSB..MSB and bits 47:46 are 0 i.e. bits 0 & 1 of right-most byte are 0.
+			byte btRandomAddr[] = getBTRandomNonResolvableAddress();
+			
+			// generate the hcitool command string
+			String hciCmd = getSetRandomBTAddrCmd( btRandomAddr);
+			
+			logger.info( "SetRandomBTAddrCmd: " + hciCmd);
+			
+			// do the right thing...
+			final String envVars[] = { 
+				"SET_RAND_ADDR_CMD=" + hciCmd
+			};
+						
+			final String cmd = "./scripts/set_random_addr";
+			
+			boolean status = runScript( cmd, envVars, this, null);
+		}
+			
+	}
+	
 	/*** 
 	 * callback during parsing of a hcidump trace file
 	 */
@@ -575,7 +755,7 @@ public class Beacon implements HCI_PDU_Handler {
 			
 			Date timeOfCapture = new Date( pdu.getTimeOfCapture());
 			
-			logger.info( String.format( "LE_AdvertisingReport: %s", timeOfCapture.toString()));
+			// logger.info( String.format( "LE_AdvertisingReport: %s", timeOfCapture.toString()));
 			
 			// LE_AdvertisingReport can nest multiple advertisement reports...
 			final LE_AdvertisingReport advRep = (LE_AdvertisingReport) pdu;
@@ -594,11 +774,14 @@ public class Beacon implements HCI_PDU_Handler {
 							final ContactDetectionServiceReport cdsr = (ContactDetectionServiceReport) advNonConnIndRep;
 						
 							
-							String cdsrPayload = cdsr.getContactDetectionService().toHex( false);
+							String cdsrPayload = cdsr.getContactDetectionService().toHex( true);
 							int rssi = cdsr.getRSSI();
 														
+							String serviceData = cdsr.getContactDetectionService().serviceDataToHex();
+							
 							logger.info( String.format( "cdsr: %s %s %d", timeOfCapture.toString(), cdsrPayload, rssi));
 							
+							this.idStore.store( serviceData, rssi, timeOfCapture);
 							
 						}
 					} else {
@@ -637,10 +820,7 @@ public class Beacon implements HCI_PDU_Handler {
 
 	static class BeaconOn extends TimerTask 
 	implements HCI_EventHandler {
-		
-		// when sending out an Apple iBeacon, we use the rolling proximity ID as payload.
-		enum AppType { I_BEACON, APPLE_GOOGLE_CONTACT_TRACING};
-		
+	
 		private Beacon beacon = null;
 		
 		private BeaconOn( Beacon beacon) {
@@ -658,14 +838,15 @@ public class Beacon implements HCI_PDU_Handler {
 		 * 
 		 * @throws Exception 
 		 */
-		private static String[] getHCIToolCmds( AppType appType, byte [] rollingProxyID, int txPower) throws Exception {
+		private static String[] getHCIToolCmds( AppType appType, byte [] rollingProxyID, int txPower,
+				boolean useRandomAddr) throws Exception {
 			String cmds[] = new String[3];
 			switch ( appType) {
 			
 			case I_BEACON:
 				// https://en.wikipedia.org/wiki/IBeacon
 				// hcitool -i hci0 cmd 0x08 0x0006 a0 00 a0 00 03 00 00 00 00 00 00 00 00 07 00
-				cmds[0] = getIBeaconSetAdvertisementParametersCommand();
+				cmds[0] = getIBeaconSetAdvertisementParametersCommand( useRandomAddr);
 				// hcitool -i hci0 cmd 0x08 0x0008 1E 02 01 06 1A FF 4C 00 02 15 FB 0B 57 A2 82 28 44 CD 91 3A 94 A1 22 BA 12 06 00 01 00 02 D1 00
 				cmds[1] = getIBeaconSetAdvertisementDataCmd( rollingProxyID, txPower);
 				// hcitool -i hci0 cmd 0x08 0x000a 01
@@ -673,7 +854,7 @@ public class Beacon implements HCI_PDU_Handler {
 				break;
 				
 			case APPLE_GOOGLE_CONTACT_TRACING:
-				cmds[0] = getContactTracingSetAdvertisingParametersCommand();
+				cmds[0] = getContactTracingSetAdvertisingParametersCommand( useRandomAddr);
 				cmds[1] = getContactTracingSetAdvertisingDataCommand( rollingProxyID, txPower);
 				if ( cmds[1] == null) {
 					throw new Exception( "failure to generate set advertising data command");
@@ -686,6 +867,7 @@ public class Beacon implements HCI_PDU_Handler {
 			return cmds;
 		}
 		
+		/**
 		// a power default level of 0xCE == -50 dBm which is roughly what I measure with my smart-phone on
 		// top of my ubuntu/bluez BLE box....
 		private int txPowerLevel = (byte) 0xCE;  // sign extension in Java...
@@ -704,7 +886,11 @@ public class Beacon implements HCI_PDU_Handler {
 			}
 			return true;			
 		}
+		**/
 		
+		public boolean onEvent( HCI_Event evt) {
+			return true;
+		}
 		
 		/***
 		 *  both, iBeacon and exposure-notification-service send out the TX Power to determine distances.
@@ -718,14 +904,37 @@ public class Beacon implements HCI_PDU_Handler {
 				return Beacon.hciTxPower;
 			}
 			
+			/**
+			 * some points on TX Power: it is *not* the power used by the BLE chip. Instead it is the power
+			 * measured 1 m away from the sender.
+			 * https://stackoverflow.com/questions/37268460/beacon-why-we-need-calibrate-tx-power
+			 * 
+			 * So we try to get this value from the properties or use a default. Querying HCI would give the wrong value,
+			 * namely the actual sending power, not the power measured 1 m away.
+			 */
+			
+			final Properties props = Beacon.getProps();
+			
+			// we expect a 2 hex-digit value using two's complement.
+			final String txPwr = props.getProperty( "beacon.txPower", "-50");
+			int txPowerLevel = Integer.parseInt( txPwr, 10);
+			if ( txPowerLevel < HCI_Command.TX_POWER_MIN || txPowerLevel > HCI_Command.TX_POWER_MAX) {
+				throw new IllegalArgumentException( "power level property out of range: " + txPwr);
+			}
+			
+			Beacon.hciTxPower = txPowerLevel;
+			
+			return Beacon.hciTxPower;
+			
+			/**
 			String hciCmd = getReadAdvertisingPhysicalChannelTxPower();
 			
-			System.err.println( "ReadAdvertisingPhysicalChannelTxPowerCmd: " + hciCmd);
+			logger.info( "ReadAdvertisingPhysicalChannelTxPowerCmd: " + hciCmd);
 			
 			// do the right thing...
 			final String envVars[] = { 
-					"READ_TX_POWER_CMD=" + hciCmd
-					} ;
+				"READ_TX_POWER_CMD=" + hciCmd
+			} ;
 			
 			final String cmd = "./scripts/read_tx_power";
 			
@@ -746,6 +955,8 @@ public class Beacon implements HCI_PDU_Handler {
 			Beacon.hciTxPower = this.txPowerLevel;
 			
 			return Beacon.hciTxPower;
+			
+			*/
 		}
 		
 		/**
@@ -765,15 +976,12 @@ public class Beacon implements HCI_PDU_Handler {
 			
 			// get the hcitool cmd string(s). see man hcitool
 			
-			// we can switch between Apple iBeacon format and the Apple & Google Exposure Notification formats
-			final AppType appType = AppType.APPLE_GOOGLE_CONTACT_TRACING; // I_BEACON; // APPLE_GOOGLE_CONTACT_TRACING;
-			
 			// we need to query the HW to get the TX power. but do this only once...
 			int txPower = readHCITxPower();
 			
 			String hciToolCmds[];
 			try {
-				hciToolCmds = getHCIToolCmds( appType, rollingProxyID, txPower);
+				hciToolCmds = getHCIToolCmds( this.beacon.getAppType(), rollingProxyID, txPower, this.beacon.useRandomAddr());
 			} catch (Exception e1) {
 				logger.severe( e1.getMessage());
 				e1.printStackTrace();
@@ -790,131 +998,23 @@ public class Beacon implements HCI_PDU_Handler {
 			final String cmd = "./scripts/beacon_start";
 			
 			boolean status = runScript( cmd, envVars, null, null);
-			
-			/** 
-			try {
-				Process process = Runtime.getRuntime().exec(cmd, envVars);
-				
-				int exitStatus = process.waitFor();
-				if ( exitStatus < 0) {
-					logger.severe( "turnBeaconOn: process exit status: " + String.valueOf( exitStatus));
-				}
-				
-				BufferedReader stdInput = new BufferedReader(new InputStreamReader(process.getInputStream()));
-				BufferedReader stdError = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-				
-				String s = null;
-				StringBuffer sb = null;
-				
-				while ((s = stdInput.readLine()) != null) {
-					System.err.println(s);
-
-					// HCI Events are split across two lines... it seems
-					// otherwise we can detect the end of an HCI Event only when we see the next HCI Command... which is too late.
-					if (s.startsWith("> HCI Event:")) {
-						sb = new StringBuffer(s);
-					} else {
-						if (sb != null) {
-							sb.append(s);							
-							HCI_Event evt = handleHCIEvent( sb.toString());
-							sb = null;							
-						}
-					}
-				}
-				
-				while ((s = stdError.readLine()) != null) {
-	               System.err.println( s);
-				}	
 		
-			} catch (Exception e) {
-				logger.severe( "turnBeaconOn: " + e.getMessage());
-				e.printStackTrace();
-			}
-			
-			*/
 		}
 		
-		/***
-		 * to turn off the processes which run hcidump and hcitool.
-		 */
-		private void turnScanningOff() {
-			
-			final String hciDumpPID = this.beacon.getHCIDumpPID();
-			final String hciToolPID = this.beacon.getHCIToolPID();
-			
-			if ( hciDumpPID == null || hciToolPID == null) {
-				logger.info( "No PIDs for hcitool or hcidump");
-				return;
-			}
-			
-			final String envVars[] = { 
-					"HCI_DUMP_PID=" + hciDumpPID,
-					"HCI_TOOL_PID=" + hciToolPID,
-			};
-			
-			final String cmd = "./scripts/kill_hcidump";
-			
-			boolean status = runScript( cmd, envVars, null, null);
-			
-			/**
-			try {
-				Process process = Runtime.getRuntime().exec(cmd, envVars);
-								
-				int exitStatus = process.waitFor();
-				if ( exitStatus < 0) {
-					logger.severe( "turnScanningOff: process exit status: " + String.valueOf( exitStatus));
-				}
-				
-				BufferedReader stdInput = new BufferedReader(new InputStreamReader(process.getInputStream()));
-				BufferedReader stdError = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-				
-				String s = null;
-				
-				while ((s = stdInput.readLine()) != null) {
-					System.err.println(s);
-				}
-				while ((s = stdError.readLine()) != null) {
-	                System.err.println(s);
-				}	
-		
-			} catch (Exception e) {
-				logger.severe( "turnScanningOff: " + e.getMessage());
-				e.printStackTrace();
-			}
-			*/
-			
-			// try to parse the dump file...
-			try {
-				
-				String fn = HCI_DUMP_FILE_NAME;
-				byte pduTypes[] = { HCIParser.HCI_EVENT /*, HCIParser.HCI_COMMAND */ };
-				
-				logger.info( String.format( "parsing hcidump trace: %s", fn));
-				
-				// callback is Beacon.onPDU()
-				status = HCIParser.parseHCI( fn, pduTypes, beacon);	
-				
-			} catch ( Exception e) {
-				logger.severe( "failure in parsing dump trace: " + e.getMessage());
-				e.printStackTrace();
-			}
-			
-		}
-	
 		@SuppressWarnings("deprecation")
 		@Override
 		public void run() {
 			
 			// BeaconOn: from idle to advertising
 			
-			// this.turnScanningOff();
+			logger.info( "BeaconOn");
 			
 			byte rollingProxyID[] = null;
 			
 			if ( Crypto.VERSION == 1) {			
 								
 				try {
-					final long dayNbr = Crypto.getDayNumber( new Date().getTime());
+					final long dayNbr = Crypto.getDayNumber( System.currentTimeMillis());
 					final char timeInterval = Crypto.getTimeIntervalNumber( dayNbr);
 					
 					logger.info( "BeaconOn: dayNbr: " + String.valueOf( dayNbr) + ", timeInterval: " + String.valueOf( (int) timeInterval));
@@ -939,14 +1039,14 @@ public class Beacon implements HCI_PDU_Handler {
 				}
 			}
 			
+			this.beacon.setStartTime( System.currentTimeMillis());
+			
 			this.turnBeaconOn( rollingProxyID);		
 			this.beacon.setState( State.ADVERTISING);
 			
 			// schedule the task to turn beacon off			
-			Date timeToTurnOff = new Date();
-			timeToTurnOff.setTime( timeToTurnOff.getTime() + BEACON_ADVERTISING_DURATION);
 			BeaconOff beaconOffTask = new BeaconOff( this.beacon);	
-			new Timer().schedule( beaconOffTask, timeToTurnOff);
+			new Timer().schedule( beaconOffTask, Beacon.getBeaconAdvertisingDuration());
 			
 		}
 		
@@ -1000,7 +1100,7 @@ public class Beacon implements HCI_PDU_Handler {
 			}
 			
 		}
-
+		
 		@Override
 		public void run() {
 			
@@ -1010,14 +1110,41 @@ public class Beacon implements HCI_PDU_Handler {
 			this.turnScanningOff();
 			this.beacon.setState( State.IDLE);
 			
-			// schedule the beaconOnTask to start advertising again.
-			Date timeToTurnOn = new Date();
-			long idleDuration = Beacon.BEACON_IDLE_DURATION;
-			assert( idleDuration > 0);
+			// we only set a flag to change address since this can only be done when Bluetooth is idle....
+			if ( this.beacon.getChangeAddressFlag()) {
+				this.beacon.setChangeAddressFlag( false);
+				
+				// change the BT address
+				this.beacon.changeBTAddress();
+				
+				// renew the rolling proximity ID
+				try {
+					logger.info( "generating a new proximity identifier");
+					Crypto.generateRollingProximityID();
+				} catch (InvalidKeyException | NoSuchAlgorithmException
+						| NoSuchPaddingException
+						| IllegalBlockSizeException | BadPaddingException
+						|  IOException e) {
+					logger.severe( e.getMessage());
+					e.printStackTrace();
+				}
+						
+			}
 			
-			timeToTurnOn.setTime( timeToTurnOn.getTime() + idleDuration);
+			// schedule the beaconOnTask to start advertising again.
+			
+			// how long where we busy?
+			long busyDuration = System.currentTimeMillis() - this.beacon.getStartTime();
+			assert( busyDuration > 0);
+			long idleDuration = Beacon.getBeaconPeriod() - busyDuration;
+			
+			if ( idleDuration <= 0) {			
+				logger.info( "no time to idle: idleDuration <= 0: " + Long.toString( idleDuration));
+				idleDuration = 0;
+			}
 			BeaconOn beaconOnTask = new BeaconOn( this.beacon);	
-			new Timer().schedule( beaconOnTask, timeToTurnOn);
+			new Timer().schedule( beaconOnTask, idleDuration);
+			
 			
 		}
 		
@@ -1116,46 +1243,6 @@ public class Beacon implements HCI_PDU_Handler {
 			
 			boolean status = runScript( cmd, envVars, null, null);
 			
-			/**
-			try {
-				Process process = Runtime.getRuntime().exec(cmd, envVars);
-								
-				int exitStatus = process.waitFor();
-				if ( exitStatus < 0) {
-					logger.severe( "turnBeaconOff: process exit status: " + String.valueOf( exitStatus));
-				}
-				
-				
-				BufferedReader stdInput = new BufferedReader(new InputStreamReader(process.getInputStream()));
-				BufferedReader stdError = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-				String s = null;
-				
-				StringBuffer sb = null;
-				while ((s = stdInput.readLine()) != null) {
-					System.err.println(s);
-
-					// HCI Events are split across two lines... it seems
-					// otherwise we can detect the end of an HCI Event only when we see the next HCI Command... which is too late.
-					if (s.startsWith("> HCI Event:")) {
-						sb = new StringBuffer(s);
-					} else {
-						if (sb != null) {
-							sb.append(s);							
-							HCI_Event evt = Beacon.handleHCIEvent( sb.toString());
-							sb = null;							
-						}
-					}
-				}
-				
-				while ((s = stdError.readLine()) != null) {
-	                System.err.println(s);
-				}	
-		
-			} catch (Exception e) {
-				logger.severe( "turnBeaconOff: " + e.getMessage());
-				e.printStackTrace();
-			}
-			*/
 			
 		}
 
@@ -1171,57 +1258,66 @@ public class Beacon implements HCI_PDU_Handler {
 			this.beacon.setState( State.SCANNING);
 						
 			// schedule the idling task.
-			Date timeToTurnIdle = new Date();
-			timeToTurnIdle.setTime( timeToTurnIdle.getTime() + BEACON_SCANNING_DURATION);			
 			BeaconIdle beaconIdleTask = new BeaconIdle( this.beacon);
-			new Timer().schedule( beaconIdleTask, timeToTurnIdle);
+			new Timer().schedule( beaconIdleTask, Beacon.getBeaconScanningDuration());
 
+		}		
+	}
+
+	/***
+	 * task to set the changeAddressFlag in beacon so that when we go idle we do the right things...
+	 * which are to generate a new proximity identifier and to generate a new random address.
+	 *
+	 */
+	private static class RollingProximityGenerationIndicator extends TimerTask {
+		
+		private Beacon beacon = null;
+		
+		RollingProximityGenerationIndicator( Beacon beacon) {
+			super();
+			this.beacon = beacon;
 		}
 
-		
+		/***
+		 * set flag to trigger change of address when going IDLE.
+		 */
+		@Override
+		public void run() {
+			this.beacon.setChangeAddressFlag( true);
+		}
 		
 	}
 	
-	
-	
-	private Timer rollingProximityGenerationTimer;
-	
 	private void loop() {
+		
+		// the very first thing we do is to change BT address if needed
+		if ( this.useRandomAddr()) {
+			this.changeBTAddress();
+		}
 		
 		// schedule the BeaconOnTask which will then start the beacon cycle.
 		Timer beaconOnTimer = new Timer();
 		BeaconOn beaconOnTask = new BeaconOn( this);		
-		// this.beaconOnTimer.scheduleAtFixedRate(beaconOnTask, 0, BEACON_PERIOD);
 		beaconOnTimer.schedule( beaconOnTask, 0);
-		
-		if ( Crypto.VERSION == 2) {
-			
-			// Each time the Bluetooth Low Energy MAC randomized address changes, 
-			// we derive a new Rolling Proximity Identifier using the Rolling Proximity Identifier Key
-			// here we simulate this as we do not create random sender addresses (yet?)
-			rollingProximityGenerationTimer = new Timer();
-			
-			rollingProximityGenerationTimer.scheduleAtFixedRate( new TimerTask() {
-
-				@Override
-				public void run() {
-					try {
-						logger.info( "generating a new proximity identifier");
-						Crypto.generateRollingProximityID();
-					} catch (InvalidKeyException | NoSuchAlgorithmException
-							| NoSuchPaddingException
-							| IllegalBlockSizeException | BadPaddingException
-							|  IOException e) {
-						logger.severe( e.getMessage());
-						e.printStackTrace();
-					}
-				}
 				
-			}, 0, ROLLING_PROXIMITY_INTERVAL);
-		}
+		// a periodic task to indicate change of BT address and renewal of proximity ID.
+		Timer rollingProximityGenerationTimer = new Timer();	
+		long when = System.currentTimeMillis() + ROLLING_PROXIMITY_INTERVAL;
+		RollingProximityGenerationIndicator indicatorTask = new RollingProximityGenerationIndicator( this);			
+		rollingProximityGenerationTimer.scheduleAtFixedRate( indicatorTask, when, ROLLING_PROXIMITY_INTERVAL);
 	
 	}
 	
+	private long startTime = System.currentTimeMillis();
+	
+	public void setStartTime(long ts) {
+		this.startTime = ts;		
+	}
+	
+	public long getStartTime() {
+		return this.startTime;
+	}
+
 	// when we launch the hcidump & hcitool to listen for incoming BLE advertisements we use
 	// two UNIX sub-processes.
 	private String hciToolPID = null;
@@ -1284,12 +1380,12 @@ public class Beacon implements HCI_PDU_Handler {
 		String cwd = System. getProperty("user.dir");
 		logger.info( "current working directory: " + cwd);	
 		
+				
+		Beacon.appProps = new Properties();
 		
-		
-		Properties appProps = new Properties();
 		try {
 			final String pfn = cwd + File.separator + PROPERTIES_FILE_NAME;			
-			appProps.load(new FileInputStream( pfn));
+			Beacon.appProps.load(new FileInputStream( pfn));
 			
 			Crypto.setProperties(appProps, pfn);
 			
@@ -1333,27 +1429,32 @@ public class Beacon implements HCI_PDU_Handler {
 			System.exit( 0);
 		}
 		
-		Beacon beacon = new Beacon();
-		
-		boolean TEST_PARSER = false;
-		
-		if ( TEST_PARSER) {
-			try {
-				String fn = cwd + File.separator + "scripts" + File.separator + "hcidump.trace";
-				byte pduTypes[] = { HCIParser.HCI_EVENT, HCIParser.HCI_COMMAND };
-				
-				boolean status = HCIParser.parseHCI( fn, pduTypes, beacon);
-				// List<ContactDetectionServiceReport> contactTracingReports = HCIParser.getContactTracingReports( l);	
-				
-			} catch ( Exception e) {
-				logger.severe( "failure in parsing dump trace: " + e.getMessage());
-				e.printStackTrace();
-				System.exit( -1);
+		try {
+			Beacon beacon = new Beacon();
+			
+			boolean TEST_PARSER = true;
+			
+			if ( TEST_PARSER) {
+				try {
+					String fn = cwd + File.separator + "scripts" + File.separator + "hcidump.trace";
+					byte pduTypes[] = { HCIParser.HCI_EVENT, HCIParser.HCI_COMMAND };
+					
+					boolean status = HCIParser.parseHCI( fn, pduTypes, beacon);
+					// List<ContactDetectionServiceReport> contactTracingReports = HCIParser.getContactTracingReports( l);	
+					
+				} catch ( Exception e) {
+					logger.severe( "failure in parsing dump trace: " + e.getMessage());
+					e.printStackTrace();
+					System.exit( -1);
+				}
+				System.exit( 0);
 			}
-			System.exit( 0);
+			
+			beacon.loop();		
+		} catch ( Exception e) {
+			e.printStackTrace();
+			System.exit( -1);
 		}
-		
-		beacon.loop();		
 	}
 
 	

@@ -28,12 +28,15 @@ public interface ProximityIDStore {
 	/***
 	 * squirrel away the advertising payload 
 	 * 
-	 * @param advertisingPayload the service data as a hexadecimal string, 2 digits per byte, no spaces.
+	 * @param serviceData the service data as a hexadecimal string, 2 digits per byte, no spaces.
+	 * we expect 16 bytes rolling proximity identifier plus 4 bytes associated encrypted metadata
+	 * thus the string length is 40 hex-dec digits.
+	 * 
 	 * @param rssi the Received Signal Strength Indication of the received BLE advertising (for whatever it is worth).
 	 * 
 	 * @return success/failure
 	 */
-	public boolean store( String advertisingPayload, int rssi);
+	public boolean store( String serviceData, int rssi, Date timeOfCapture);
 	
 	/***
 	 * discard all encounters before the given date.
@@ -43,6 +46,17 @@ public interface ProximityIDStore {
 	 * @return success/failure
 	 */
 	public boolean purge( Date before);
+	
+	/**
+	 * purge exposures which are shorter than some min. duration of exposure.
+	 * that is, if we see an rolling proximity identifier for less that the duration, we consider
+	 * the exposure to be too short to be relevant from an infection point of view and can purge it.
+	 * 
+	 * @param duration if the encounter is shorter than duration, it will be dropped.
+	 * @param before only consider encounters of which the last time of capture is before the given date, which
+	 * 		should be sufficiently back in the past. That is, before should be < now - duration.
+	 */
+	public boolean purgeEphemerousEncounters( long duration, Date before);
 	
 	
 

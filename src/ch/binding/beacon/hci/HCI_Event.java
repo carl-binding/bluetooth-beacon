@@ -23,17 +23,35 @@ import ch.binding.beacon.hci.HCI_Event;
 // event from HCI to app
 public class HCI_Event extends HCI_PDU {
 	
-	// 7.7.1 Inquiry Complete event
-	public static final byte  HCI_Inquiry_Complete = 0x01;
+	/************************** event codes ***********************************************/
 	
-	// 7.7.2 Inquiry Result event
-	public static final byte HCI_Inquiry_Result = 0x02;
+	/**
+	 * Host Controller Interface
+	 * PART E: HOST CONTROLLER
+	 * INTERFACE FUNCTIONAL SPECIFICATION
+	 * 7 HCI COMMANDS AND EVENTS
+	 */
 	
-	// 7.7.3 Connection Complete event
-	public static final byte HCI_Connection_Complete = 0x03;
+	// section 7.7 Events
+	public static final int HCI_Inquiry_Complete = 0x01;
+	public static final int HCI_Inquiry_Result = 0x02;
+	public static final int HCI_Connection_Complete = 0x03;
+	public static final int HCI_Connection_Request = 0x04;
+	public static final int HCI_Disconnection_Complete = 0x05;
+	public static final int HCI_Authentication_Complete = 0x06;
+	public static final int HCI_Remote_Name_Request_Complete = 0x07;
+	public static final int HCI_Encryption_Change = 0x08;
+	public static final int HCI_Change_Connection_Link_Key_Complete = 0x09;
+	public static final int HCI_Master_Link_Key_Complete = 0x0A;
+	public static final int HCI_Read_Remote_Supported_Features_Complete = 0x0B;
+	public static final int HCI_Read_Remote_Version_Information_Complete = 0x0C;
+	public static final int HCI_QoS_Setup_Complete = 0x0D;
+	public static final int HCI_Command_Complete = 0x0E;
+	// TBD
 	
-	// 7.7.14 Command Complete event
-	public static final byte HCI_Command_Complete = 0x0E;
+	// 7.7.65 LE Meta event
+	public static final int HCI_Meta_Event = 0x3E;
+
 	
 	byte eventCode;
 	byte len;
@@ -80,6 +98,9 @@ public class HCI_Event extends HCI_PDU {
 			return new HCI_ConnectionComplete( this);
 		case HCI_Command_Complete:
 			return new HCI_CommandComplete( this);
+		case HCI_Meta_Event:
+			LE_MetaEvent metaEvent = new LE_MetaEvent( this).parse();
+			return metaEvent;
 		}
 		return this;
 	}

@@ -21,6 +21,16 @@ import ch.binding.beacon.hci.HCI_PDU;
 public class HCI_Command extends HCI_PDU {
 	
 	/***
+	 * max tx power, dBm
+	 */
+	public static final int TX_POWER_MAX = 20;
+	
+	/***
+	 * min tx power, dBm
+	 */
+	public static final int TX_POWER_MIN = -127;
+	
+	/***
 	 * constant defining the maximum length, in bytes, of the advertisement payload.
 	 * the data is preceded by one length byte, so we get 32 bytes payload in length-value.
 	 * deeply buried in the BLE specs.
@@ -117,8 +127,13 @@ public class HCI_Command extends HCI_PDU {
 	// 7.8.6 LE Read Advertising Physical Channel Tx Power command
 	public static final short HCI_LE_Read_Advertising_Physical_Channel_Tx_Power_OCF = 0x0007;
 	
-	short OCF;
-	byte OGF;
+	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E	page 2480
+	// 7.8.4 LE Set Random Address command
+	public static final short HCI_LE_Set_Random_Address_OCF = 0x0005;
+	
+	
+	short OCF; // 10 bit of opcode field
+	byte OGF;  // 6 bit of opcode group field
 	byte len;
 	
 	byte data[];

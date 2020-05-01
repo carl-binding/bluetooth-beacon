@@ -19,6 +19,30 @@ import ch.binding.beacon.hci.LE_AdvertisingReport;
 
 public class LE_MetaEvent extends HCI_Event {
 	
+	/*************************** Meta Event sub-event type codes  ************************/
+	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E 	page 2379
+	
+	// 7.7.65.1 LE Connection Complete event
+	public static final int HCI_LE_Connection_Complete = 0x01;
+	
+	// 7.7.65.2 LE Advertising Report event
+	public static final int HCI_LE_Advertising_Report = 0x02;
+	
+	// 7.7.65.3 LE Connection Update Complete event
+	public static final int HCI_LE_Connection_Update_Complete = 0x03;
+	
+	// 7.7.65.4 LE Read Remote Features Complete event
+	public static final int HCI_LE_Read_Remote_Features_Complete = 0x04;
+	
+	// 7.7.65.5 LE Long Term Key Request event
+	public static final int HCI_LE_Long_Term_Key_Request = 0x05;
+	
+	// TBD: additional sub-event codes as needed
+	
+	// 7.7.65.34 LE BIGInfo Advertising Report event
+	public static final int HCI_LE_BIGInfo_Advertising_Report = 0x22;
+	
+	
 	byte subEventCode; // byte 0 of event data. determines type of meta-sub-event
 	
 	public LE_MetaEvent( LE_MetaEvent e) {
@@ -38,12 +62,14 @@ public class LE_MetaEvent extends HCI_Event {
 	 */
 	public LE_MetaEvent parse() throws Exception {
 		switch ( this.subEventCode) {
-		case HCIParser.HCI_LE_Advertising_Report:
+		case HCI_LE_Advertising_Report:
 			LE_AdvertisingReport advRep = new LE_AdvertisingReport( this).parse();			
 			return advRep;
 		// TBD
+		case HCI_LE_Connection_Update_Complete:
+		case HCI_LE_Read_Remote_Features_Complete:
 		default: 
-			throw new Exception( "unhandled meta sub-event code");
+			throw new Exception( "unhandled meta sub-event code " + Byte.toString( this.subEventCode));
 		}
 	}
 	

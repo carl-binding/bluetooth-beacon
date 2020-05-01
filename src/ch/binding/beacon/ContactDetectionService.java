@@ -236,11 +236,24 @@ public class ContactDetectionService  {
 		}
 		return sb.toString();
 	}
+	
+	public String serviceDataToHex() {
+		StringBuffer sb = new StringBuffer();
+		
+		assert( this.serviceData.length == Beacon.ROLLING_PROXY_ID_LENGTH);
+		sb.append( bytes2Hex( this.serviceData, false));
+		if ( this.metaData != null) {
+			assert( this.metaData.length == Beacon.ASSOCIATED_META_DATA_LENGTH);
+			sb.append( bytes2Hex( this.metaData, false));
+		}
+		return sb.toString();
+	}
+	
 	/**
 	 * @param withSpaces if true, hex-dec byte values are space separated.
 	 * 	if false, a 4-byte length header is prepended to the non-space separated hex-dec byte values.
 	 * 
-	 * @return a hex string to interface hcitool
+	 * @return a hex string representation of the contact service data, incl. associated encrypted metadata.
 	 */
 	public String toHex( boolean withSpaces) {
 		StringBuffer sb = new StringBuffer();
@@ -282,20 +295,20 @@ public class ContactDetectionService  {
 			return sb.toString();
 			
 		} else {
-			sb.append( String.format( "%02x", this.flagsLen));
-			sb.append( String.format( "%02x", this.flagsType));
-			sb.append( String.format( "%02x", this.flags));
+			sb.append( String.format( "%02x", this.flagsLen));  // 2
+			sb.append( String.format( "%02x", this.flagsType)); // 4
+			sb.append( String.format( "%02x", this.flags));     // 6
 			
-			sb.append( String.format( "%02x", this.serviceUUIDLen));
-			sb.append( String.format( "%02x", this.serviceUUIDType));
-			sb.append( String.format( "%02x %02x", this.serviceUUID[0], this.serviceUUID[1]));
+			sb.append( String.format( "%02x", this.serviceUUIDLen));  // 8
+			sb.append( String.format( "%02x", this.serviceUUIDType)); // 10
+			sb.append( String.format( "%02x%02x", this.serviceUUID[0], this.serviceUUID[1])); //12
 			
-			sb.append( String.format( "%02x", this.serviceDataLen));
-			sb.append( String.format( "%02x", this.serviceDataType));
-			sb.append( String.format( "%02x %02x", this.serviceDataUUID[0], this.serviceDataUUID[1]));
+			sb.append( String.format( "%02x", this.serviceDataLen));	//14
+			sb.append( String.format( "%02x", this.serviceDataType));	//16
+			sb.append( String.format( "%02x%02x", this.serviceDataUUID[0], this.serviceDataUUID[1]));  // 18
 			
 			assert( this.serviceData.length == Beacon.ROLLING_PROXY_ID_LENGTH);
-			sb.append( bytes2Hex( this.serviceData, withSpaces));
+			sb.append( bytes2Hex( this.serviceData, withSpaces)); // 32 + 18 = 50
 			
 			/*
 			for ( int i = 0; i < ROLLING_PROXIMITY_IDENTIFIER_LENGTH; i++) {
@@ -310,14 +323,16 @@ public class ContactDetectionService  {
 			*/
 			
 			if ( this.metaData != null) {
-				assert( this.metaData.length == Beacon.ASSOCIATED_META_DATA_LENGTH);
-				sb.append( " ");
+				assert( this.metaData.length == Beacon.ASSOCIATED_META_DATA_LENGTH); // 54
 				sb.append( bytes2Hex( this.metaData, withSpaces));
 			}
 			
 			String s = sb.toString();
+			
 			// prepend a 4 byte length header, so we have enough range...
-			String ls = String.format( "%04x", (s.length() & 0xFFFF));
+			final int slen = s.length();
+			// use LSB
+			String ls = String.format( "%02x%02x", (slen & 0xFFFF), ((slen >> 8) & 0xFFFF));
 			return ls + s;
 		}
 		

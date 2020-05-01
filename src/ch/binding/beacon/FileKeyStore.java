@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /***
@@ -34,11 +33,7 @@ import java.util.logging.Logger;
  */
 public class FileKeyStore implements KeyStore, java.io.Serializable {
 	
-	static Logger logger = Logger.getLogger(FileKeyStore.class.getName());
-	
-	static {
-		logger.setLevel( Level.ALL);
-	}
+	static Logger logger = Beacon.getLogger();
 	
 	/**
 	 * 
