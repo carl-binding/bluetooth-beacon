@@ -130,18 +130,15 @@ public class HCIParser {
 		switch ( hciEvent.eventCode) {
 		case HCI_Event.HCI_Meta_Event:	
 			LE_MetaEvent metaEvent = new LE_MetaEvent( hciEvent).parse();
-		
-			// logger.info( metaSubEvent.toString());
-			
 			return metaEvent;
-			
 		case HCI_Event.HCI_Command_Complete:
 			HCI_CommandComplete cc = new HCI_CommandComplete( hciEvent);
-			
-			// logger.info( cc.toString());
-			
 			return cc;
-		// TBD
+		case HCI_Event.HCI_Command_Status:
+			HCI_CommandStatus cs = new HCI_CommandStatus( hciEvent);
+			return cs;
+			
+		// TBD: many more event codes to handle... see section 7.7 of specs BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E	page 2310
 		default:
 			logger.severe("unhandled HCI event code: " + Byte.toString( hciEvent.eventCode));
 			System.exit( -1);

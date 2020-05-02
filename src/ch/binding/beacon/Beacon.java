@@ -39,6 +39,7 @@ import ch.binding.beacon.db.SQLiteIDStore;
 import ch.binding.beacon.hci.HCIParser;
 import ch.binding.beacon.hci.HCI_Command;
 import ch.binding.beacon.hci.HCI_CommandComplete;
+import ch.binding.beacon.hci.HCI_CommandStatus;
 import ch.binding.beacon.hci.HCI_ConnectionComplete;
 import ch.binding.beacon.hci.HCI_EventHandler;
 import ch.binding.beacon.hci.HCI_InquiryComplete;
@@ -95,7 +96,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	enum AppType { I_BEACON, APPLE_GOOGLE_CONTACT_TRACING};
 	
 	// we can switch between Apple iBeacon format and the Apple & Google Exposure Notification formats
-	final private AppType appType = AppType.I_BEACON; // APPLE_GOOGLE_CONTACT_TRACING;
+	final private AppType appType = AppType.APPLE_GOOGLE_CONTACT_TRACING; // .I_BEACON; // .APPLE_GOOGLE_CONTACT_TRACING;
 	
 	AppType getAppType() {
 		return this.appType;
@@ -137,7 +138,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	
 	// exposure notification Google & Apple
 	
-	public static final int CONTACT_TRACING_ADVERTISING_INTERVAL = 200; // msecs
+	public static final int ADVERTISING_INTERVAL_IBEACON = 100; // msecs
+	public static final int ADVERTISING_INTERVAL_CONTACT_TRACING = 200; // msecs
 	
 	/***
 	 * size in octets of the rolling proxy id as per Advertising Payload specs
@@ -374,15 +376,36 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		return sb.toString();
 	}
 	
+	/***
+	 * 
+	 * @param duration in milli-secs
+	 * @return nbr of intervals in LSB
+	 */
+	public static String getAdvertisingInterval( double duration) {
+		final int nbrIntervals = (int) (duration / 0.625);
+		
+		assert( 0x0020 <= nbrIntervals && nbrIntervals <= 0x4000);
+		
+		final String s = String.format( "%02x %02x ", (nbrIntervals & 0xFF), ((nbrIntervals >> 8) & 0xFF));
+		
+		return s;
+		
+	}
 	
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E,	page 2482
 	// 7.8.5 LE Set Advertising Parameters command
 	private static String getIBeaconSetAdvertisementParametersCommand( boolean useRandomAddr) {
 		StringBuffer sb = new StringBuffer();
+		
 		sb.append( String.format( "0x%02x 0x%04x ", HCI_Command.HCI_LE_Controller_OGF, HCI_Command.HCI_LE_Set_Advertising_Parameters_OCF));
 		
-		sb.append( "a0 00 ");  // Advertising_Interval_Min:	Size: 2 octets
-		sb.append( "a0 00 ");  // Advertising_Interval_Max:	Size: 2 octets
+		String advertisingInterval = getAdvertisingInterval( Beacon.ADVERTISING_INTERVAL_IBEACON);
+		
+		// sb.append( "a0 00 ");  // Advertising_Interval_Min:	Size: 2 octets
+		// sb.append( "a0 00 ");  // Advertising_Interval_Max:	Size: 2 octets
+		
+		sb.append( advertisingInterval);   // Advertising_Interval_Min:	Size: 2 octets
+		sb.append( advertisingInterval);   // Advertising_Interval_Max:	Size: 2 octets
 		
 		sb.append( String.format( "%02x ", ADV_NONCONN_IND));     // Advertising_Type:	Size: 1 octet
 		
@@ -398,23 +421,16 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		return sb.toString();
 	}
 	
-	public static String getAdvertisingInterval( double duration) {
-		final int nbrIntervals = (int) (duration / 0.625);
-		
-		assert( 0x0020 <= nbrIntervals && nbrIntervals <= 0x4000);
-		
-		final String s = String.format( "%02x %02x ", ((nbrIntervals >> 8) & 0xFF), (nbrIntervals & 0xFF));
-		
-		return s;
-		
-	}
+	
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 4, Part E,	page 2482
 	// 7.8.5 LE Set Advertising Parameters command
 	private static String getContactTracingSetAdvertisingParametersCommand( boolean useRandomAddr) {
 		StringBuffer sb = new StringBuffer();
 		sb.append( String.format( "%02x %04x ", HCI_Command.HCI_LE_Controller_OGF, HCI_Command.HCI_LE_Set_Advertising_Parameters_OCF));
 		
-		String advertisingInterval = getAdvertisingInterval( CONTACT_TRACING_ADVERTISING_INTERVAL);
+		String advertisingInterval = getAdvertisingInterval( Beacon.ADVERTISING_INTERVAL_CONTACT_TRACING);
+		sb.append( advertisingInterval);  // Advertising_Interval_Min:	Size: 2 octets
+		sb.append( advertisingInterval);  // Advertising_Interval_Max:	Size: 2 octets
 		
 		// Advertising_Interval_Min:	Size: 2 octets
 		// sb.append( String.format( "%02x %02x ", ((nbrIntervals >> 8) & 0xFF), (nbrIntervals & 0xFF)));
@@ -422,8 +438,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		// Advertising_Interval_Max:	Size: 2 octets
 		// sb.append( String.format( "%02x %02x ", ((nbrIntervals >> 8) & 0xFF), (nbrIntervals & 0xFF)));
 		
-		sb.append( "a0 00 ");  // Advertising_Interval_Min:	Size: 2 octets
-		sb.append( "a0 00 ");  // Advertising_Interval_Max:	Size: 2 octets
+		// sb.append( "a0 00 ");  // Advertising_Interval_Min:	Size: 2 octets
+		// sb.append( "a0 00 ");  // Advertising_Interval_Max:	Size: 2 octets
 		
 		// 0x03 Non connectable undirected advertising (ADV_NONCONN_IND)
 		sb.append( String.format( "%02x ", ADV_NONCONN_IND));    // Advertising_Type:	Size: 1 octet
@@ -460,11 +476,10 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		byte encryptedMetaData[] = null;
 		try {
 			
-			encryptedMetaData = (metaData==null)?null:Crypto.getAssociatedEncryptedMetadata(metaData);
+			// use the current key stuff, thus passing no temp exposure key nor an ENIN.
+			encryptedMetaData = (metaData==null)?null:Crypto.getAssociatedEncryptedMetadata(metaData, null, -1);
 			
-		} catch (InvalidKeyException | NoSuchAlgorithmException
-				| NoSuchPaddingException | IllegalBlockSizeException | BadPaddingException
-				| InvalidAlgorithmParameterException | IOException e) {
+		} catch (Exception e) {
 			logger.severe( e.getMessage());
 			e.printStackTrace();
 			return null;
@@ -589,6 +604,13 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			} else if ( hciEvt instanceof HCI_InquiryComplete) {
 			} else if ( hciEvt instanceof HCI_InquiryResult) {
 			} else if ( hciEvt instanceof HCI_ConnectionComplete) {
+			} else if ( hciEvt instanceof HCI_CommandStatus) {
+				byte status = ((HCI_CommandStatus) hciEvt).getStatus();
+				if ( status != 0x00) {
+					HCI_Command.ErrorCode ec = HCI_Command.getErrorCode(status);
+					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI Event: %s", ec.code, ec.name, hciEvt.toString()));
+				}
+				return hciEvt;
 			} else {
 				logger.severe( "HCI_Event: " + hciEvt.toString());
 				logger.severe( "unhandled HCI Event in HCI response");
@@ -1408,22 +1430,16 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			}
 			
 			try {
-				byte [] metadataKey = Crypto.getAssociatedEncryptedMetadataKey();
+				byte [] metadataKey = Crypto.getAssociatedEncryptedMetadataKey( null);
 				
 				byte [] metadata = "some metadata".getBytes( "UTF-8");
 				
-				byte [] encryptedMetaData = Crypto.getAssociatedEncryptedMetadata(metadata);
+				byte [] encryptedMetaData = Crypto.getAssociatedEncryptedMetadata(metadata, null, -1);
 				
 				assert( encryptedMetaData.length == metadata.length);
-			} catch (InvalidKeyException | NoSuchAlgorithmException
-						| NoSuchPaddingException | IllegalBlockSizeException
-						| BadPaddingException
-						| InvalidAlgorithmParameterException e) {
+			} catch (Exception e) {
 					logger.severe( e.getMessage());
 					e.printStackTrace();
-			} catch (IOException e) {
-				logger.severe( e.getMessage());
-				e.printStackTrace();
 			}
 			
 			System.exit( 0);
@@ -1437,6 +1453,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			if ( TEST_PARSER) {
 				try {
 					String fn = cwd + File.separator + "scripts" + File.separator + "hcidump.trace";
+					// String fn = Beacon.HCI_DUMP_FILE_NAME;
 					byte pduTypes[] = { HCIParser.HCI_EVENT, HCIParser.HCI_COMMAND };
 					
 					boolean status = HCIParser.parseHCI( fn, pduTypes, beacon);

@@ -26,11 +26,11 @@ public class HCI_CommandComplete extends HCI_Event {
 	short OCF;  // 10 most significant bits of commandOpcode opcode command field
 	byte OGF;   // 6 least significant bits of commandOpcode opcode command group
 	
-	short getOCF() {
+	public short getOCF() {
 		return this.OCF;
 	}
 	
-	byte getOGF() {
+	public byte getOGF() {
 		return this.OGF;
 	}
 		

@@ -47,7 +47,9 @@ public class HCI_Event extends HCI_PDU {
 	public static final int HCI_Read_Remote_Version_Information_Complete = 0x0C;
 	public static final int HCI_QoS_Setup_Complete = 0x0D;
 	public static final int HCI_Command_Complete = 0x0E;
-	// TBD
+	public static final int HCI_Command_Status = 0x0F;
+	
+	// TBD: there are tons more in section 7.7...
 	
 	// 7.7.65 LE Meta event
 	public static final int HCI_Meta_Event = 0x3E;
@@ -98,6 +100,8 @@ public class HCI_Event extends HCI_PDU {
 			return new HCI_ConnectionComplete( this);
 		case HCI_Command_Complete:
 			return new HCI_CommandComplete( this);
+		case HCI_Command_Status:
+			return new HCI_CommandStatus( this);
 		case HCI_Meta_Event:
 			LE_MetaEvent metaEvent = new LE_MetaEvent( this).parse();
 			return metaEvent;

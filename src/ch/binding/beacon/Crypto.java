@@ -319,15 +319,19 @@ public class Crypto {
 	 * @return the Rolling Proximity Identifier Key (RPIK) which is derived from the Temporary Exposure Key
 	 *  note that this key is not time-dependent beyond the time-dependency of the temporary exposure key.
 	 *  
+	 *  @param tek temporary exposure key or null.
+	 *  
 	 * @throws IOException 
 	 * @throws FileNotFoundException 
 	 */
-	static synchronized byte [] getRollingProximityIdentifierKey() throws FileNotFoundException, IOException {
+	static synchronized byte [] getRollingProximityIdentifierKey( byte [] tek) throws FileNotFoundException, IOException {
 		byte en_rpik_bytes[] = "EN-RPIK".getBytes( "UTF-8");
 				
 		HKDF hkdf = HKDF.fromHmacSha256();
 		
-		final byte [] tek = getTemporaryExposureKey();
+		if ( tek == null) {
+			tek = getTemporaryExposureKey();
+		}
 		
 		assert( tek.length == TEMP_EXPOSURE_KEY_LEN);
 						
@@ -371,6 +375,79 @@ public class Crypto {
 		return Crypto.rollingProximityID;
 	}
 	
+	private static long eninOfProximityIDGeneration = 0;
+	
+	/***
+	 * To either generate a new rolling proximity ID or reconstruct one based on a known
+	 * temporary exposure key and some matching ENIN.
+	 * 
+	 * @param tek temporary exposure key. can be null in which case enin must be < 0 and the current enin & temporary exposure keys are taken.
+	 * 
+	 * @param enin if < 0 take current time and the current temporary exposure key is used (tek == null)
+	 * 
+	 * @return rolling proximity ID, 16 bytes
+	 * 
+	 * @throws FileNotFoundException
+	 * @throws IOException
+	 * @throws NoSuchAlgorithmException
+	 * @throws NoSuchPaddingException
+	 * @throws InvalidKeyException
+	 * @throws IllegalBlockSizeException
+	 * @throws BadPaddingException
+	 */
+	static synchronized byte [] getRollingProximityID( final byte [] tek, long enin) 
+			throws FileNotFoundException, IOException, NoSuchAlgorithmException, NoSuchPaddingException, 
+			InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+		
+		// when a valid enin is given, the proper key should come along too...
+		if ( tek != null && enin < 0) {
+			throw new IllegalArgumentException();
+		}
+		// when no key is given, no enin is needed either. we take the current time and key
+		if ( tek == null && enin >= 0) {
+			throw new IllegalArgumentException();
+		}
+		
+		assert( VERSION == 2);
+		
+		Crypto.init();
+		
+		if ( enin < 0) {
+			final long now = System.currentTimeMillis()/1000; // secs
+			enin = getENIntervalNumber( now);
+			eninOfProximityIDGeneration = enin;
+		}
+		
+		byte padding[] = new byte[16];
+		
+		System.arraycopy( "EN-RPI".getBytes( "UTF-8"), 0, padding, 0, "EN-RPI".length());
+		
+		// LSB byte ordering, append ENIN
+		padding[12] = (byte) (enin & 0xFF);
+		padding[13] = (byte) (enin >> 8 % 0xFF);
+		padding[14] = (byte) (enin >> 16 % 0xFF);
+		padding[15] = (byte) (enin >> 24 % 0xFF);
+		
+		// Advanced Encryption Standard as specified by NIST in FIPS 197. 
+		// Also known as the Rijndael algorithm by Joan Daemen and Vincent Rijmen, AES is a 128-bit block cipher supporting keys of 128, 192, and 256 bits.
+		final byte [] rpik = getRollingProximityIdentifierKey( tek);
+		SecretKeySpec aesKey = new SecretKeySpec( rpik, 0, ROLLING_PROXIMITY_IDENTIFIER_KEY_LEN, "AES");
+		
+		// https://docs.oracle.com/javase/9/docs/api/javax/crypto/Cipher.html
+		// "AES/ECB/NoPadding"
+		Cipher cipher = Cipher.getInstance("AES/ECB/NoPadding");
+        cipher.init( Cipher.ENCRYPT_MODE, aesKey);
+        
+        byte rollingProximityID[] = cipher.doFinal( padding);
+		
+		assert( rollingProximityID.length == ROLLING_PROXIMITY_IDENTIFIER_KEY_LEN);
+		
+		return rollingProximityID;
+		
+	}
+	
+	
+	
 	/***
 	 * to generate a new rolling proximity ID. this ID uses the ENIntervalNumber of the curernt time
 	 * i.e. the 10 min interval index starting with UNIX EPOCH.
@@ -388,6 +465,7 @@ public class Crypto {
 			NoSuchPaddingException, InvalidKeyException, 
 			IllegalBlockSizeException, BadPaddingException, FileNotFoundException, IOException {
 		
+		/*
 		assert( VERSION == 2);
 		
 		Crypto.init();
@@ -407,7 +485,7 @@ public class Crypto {
 		
 		// Advanced Encryption Standard as specified by NIST in FIPS 197. 
 		// Also known as the Rijndael algorithm by Joan Daemen and Vincent Rijmen, AES is a 128-bit block cipher supporting keys of 128, 192, and 256 bits.
-		final byte [] rpik = getRollingProximityIdentifierKey();
+		final byte [] rpik = getRollingProximityIdentifierKey( null);
 		SecretKeySpec aesKey = new SecretKeySpec( rpik, 0, ROLLING_PROXIMITY_IDENTIFIER_KEY_LEN, "AES");
 		
 		// https://docs.oracle.com/javase/9/docs/api/javax/crypto/Cipher.html
@@ -418,22 +496,30 @@ public class Crypto {
         byte rollingProximityID[] = cipher.doFinal( padding);
 		
 		assert( rollingProximityID.length == ROLLING_PROXIMITY_IDENTIFIER_KEY_LEN);
+		*/
 		
-		Crypto.rollingProximityID = rollingProximityID;
+		Crypto.rollingProximityID = getRollingProximityID( null, -1);
 	}
 	
 	
 	/***
 	 * The Associated Metadata Encryption keys are derived from the Temporary Exposure Keys 
 	 * in order to encrypt additional metadata.
+	 * 
+	 * @param tek temporary exposure key or null, in which case the currently valid temp. exposure key is used.
+	 * 
 	 * @return associated metadata encryption key.
+	 * 
 	 * @throws IOException 
 	 * @throws FileNotFoundException 
 	 */
-	static synchronized byte [] getAssociatedEncryptedMetadataKey () 
+	static synchronized byte [] getAssociatedEncryptedMetadataKey ( byte [] tek) 
 			throws FileNotFoundException, IOException {
 		
-		byte tek[] = Crypto.getTemporaryExposureKey();
+		if ( tek == null) {
+			// currently valid temp exposure key
+			tek = Crypto.getTemporaryExposureKey();
+		}
 		
 		byte ct_aemk_bytes[] = "CT-AEMK".getBytes( "UTF-8");
 		
@@ -453,32 +539,38 @@ public class Crypto {
 	 * Encryption key is derived from temporary-exposure-key and AES 128 COUNTER, no-padding is then used.
 	 * 
 	 * @param metadata data to be encrypted, array of bytes
-	 * @return encrypted data, array of bytes, identical length to input data
+	 * @param tek temporary exposure key.
 	 * 
-	 * @throws NoSuchAlgorithmException
-	 * @throws NoSuchPaddingException
-	 * @throws InvalidKeyException
-	 * @throws FileNotFoundException
-	 * @throws IOException
-	 * @throws IllegalBlockSizeException
-	 * @throws BadPaddingException
-	 * @throws InvalidAlgorithmParameterException
+	 * @return encrypted data, array of bytes, identical length to input data
+	 * @throws Exception 
 	 */
-	static byte[] getAssociatedEncryptedMetadata( byte metadata[]) 
-			throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
-			FileNotFoundException, IOException, IllegalBlockSizeException, BadPaddingException, InvalidAlgorithmParameterException {
+	static byte[] getAssociatedEncryptedMetadata( byte metadata[], final byte [] tek, long enin) 
+			throws Exception {
 		
 		Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
 			
 		// generate the AES secret key using the associated encrypted metadata key.
-		final byte [] encryptionKey = getAssociatedEncryptedMetadataKey();
+		final byte [] encryptionKey = getAssociatedEncryptedMetadataKey( tek);
 		
 		assert( encryptionKey.length == ASSOC_ENCRYPTED_META_DATA_KEY_LEN);
 		
 		SecretKeySpec aesKey = new SecretKeySpec( encryptionKey, "AES");
 		
 		// AES CTR takes an initialization vector, IV for which they use the rolling-proximity-ID so they can decrypt when necessary
-		byte rpi[] = getRollingProximityID();
+		byte rpi[] = null;
+		
+		if ( tek == null && enin < 0) {
+			
+			final long now = System.currentTimeMillis()/1000; // secs
+			enin = getENIntervalNumber( now);
+			if ( enin != Crypto.eninOfProximityIDGeneration) {
+				throw new Exception( "ENIN out of sync with proximity ID");
+			}
+			
+			rpi = getRollingProximityID();	
+		} else if ( tek != null && enin >= 0) {
+			rpi = getRollingProximityID( tek, enin);
+		}
 		
 		assert( rpi.length == ROLLING_PROXIMITY_IDENTIFIER_LEN);
 		

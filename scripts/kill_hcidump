@@ -25,9 +25,10 @@ if [ ! -z "$HCI_DUMP_PID" ]; then
 	
 	sudo kill -9 $CHILD_PID
 	echo "killed child " $CHILD_PID
-	
-	sudo kill -9 $HCI_DUMP_PID
-	echo "killed " $HCI_DUMP_PID	
+
+##  Ubuntu 18.04 seems to terminate parent by itself when child is killed
+##	sudo kill -9 $HCI_DUMP_PID
+##	echo "killed " $HCI_DUMP_PID	
 	
 fi 
 
@@ -42,6 +43,8 @@ if [ ! -z "$HCI_TOOL_PID" ]; then
 	sudo kill -9 $CHILD_PID
 	echo "killed child " $CHILD_PID
 	
-	sudo kill -9 $HCI_TOOL_PID
-	echo "killed " $HCI_TOOL_PID
+##  Ubuntu 18.04 seems to terminate parent by itself when child is killed
+##	sudo kill -9 $HCI_TOOL_PID
+##	echo "killed " $HCI_TOOL_PID
+
 fi 
