@@ -48,9 +48,13 @@ import ch.binding.beacon.hci.HCI_PDU;
 import ch.binding.beacon.hci.HCI_Event;
 import ch.binding.beacon.hci.HCI_PDU_Handler;
 import ch.binding.beacon.hci.LE_AdvertisingReport;
+import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_DIRECT_IND_Report;
+import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_IND_Report;
 import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_NONCONN_IND_Report;
+import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_SCAN_IND_Report;
 import ch.binding.beacon.hci.LE_AdvertisingReport.AdvertisingReport;
 import ch.binding.beacon.hci.LE_AdvertisingReport.ContactDetectionServiceReport;
+import ch.binding.beacon.hci.LE_AdvertisingReport.SCAN_RSP_Report;
 
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
@@ -584,41 +588,154 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		logger.setLevel( Level.ALL);
 	}
 	
+	/***
+	 * we have seen during scanning or during advertising an incoming LE_AdvertisingReport event which
+	 * we take apart further as it may contain multiple AdvertisingReports.
+	 * 
+	 * @param advRep LE_AdvertisingReport	  
+	 * @param timeOfCapture
+	 * 
+	 * @return success/failure
+	 */
+	private boolean handle_LE_AdvertisingReport( LE_AdvertisingReport advRep, Date timeOfCapture) {
+		
+		final int nbrReports = advRep.getNumberReports();
+		
+		for ( int i = 0; i < nbrReports; i++) {
+			try {
+				
+				AdvertisingReport ar = advRep.getAdvertisingReport(i);
+				// further narrow the AdvertisingReport...
+				ar = ar.parse();
+				
+				if ( ar instanceof ADV_NONCONN_IND_Report) {
+					
+					// these are the ones we are expecting for contact tracing... try to parse the report further
+					final ADV_NONCONN_IND_Report advNonConnIndRep = ((ADV_NONCONN_IND_Report) ar).parse();
+					
+					if ( advNonConnIndRep instanceof ContactDetectionServiceReport) {
+						
+						// finally we got a contact detection event...
+						final ContactDetectionServiceReport cdsr = (ContactDetectionServiceReport) advNonConnIndRep;
+						
+						String cdsrPayload = cdsr.getContactDetectionService().toHex( true);
+						int rssi = cdsr.getRSSI();
+													
+						String serviceData = cdsr.getContactDetectionService().serviceDataToHex();
+						
+						logger.info( String.format( "cdsr: %s %s %d", timeOfCapture.toString(), cdsrPayload, rssi));
+						
+						this.idStore.store( serviceData, rssi, timeOfCapture);
+						
+					} else {
+						// logger.info( "ADV_NONCONN_IND: not a ContactDetectionServiceReport: " + ar.toString());
+					}
+				} else if ( ar instanceof ADV_IND_Report) {
+				} else if ( ar instanceof ADV_DIRECT_IND_Report) {
+				} else if ( ar instanceof ADV_SCAN_IND_Report) {
+				} else if ( ar instanceof SCAN_RSP_Report) {
+				} else {
+					logger.warning( "unhandled AdvertisingReport: " + ar.toString());
+				}
+			} catch (Exception e) {
+				logger.severe( e.getMessage());
+				e.printStackTrace();
+				return false;
+			}
+		}	
+		return true;
+	}
 	
+	/*** 
+	 * callback during parsing of a hcidump trace file for events gotten in hcidump trace during the scanning phase
+	 */
+	@Override
+	public boolean onPDU( HCI_PDU pdu) {
+		
+		if ( pdu instanceof LE_AdvertisingReport) {
+			
+			Date timeOfCapture = new Date( pdu.getTimeOfCapture());
+			
+			return this.handle_LE_AdvertisingReport( (LE_AdvertisingReport) pdu, timeOfCapture);
+		
+		}
+		
+		return true;
+	}
 	
 	/***
-	 * to parse HCI events and testing the status value for HCI_Events we get back from hcitool.
+	 * additional event handling for events of interest which we receive from hcitool and scripts during advertising...
+	 * This does happen...
+	 */
+	@Override
+	public boolean onEvent( HCI_Event evt) {
+		if ( evt instanceof HCI_CommandComplete) {
+		} else if ( evt instanceof HCI_CommandStatus) {
+		} else if ( evt instanceof HCI_InquiryComplete) {
+		} else if ( evt instanceof HCI_InquiryResult) {
+		} else if ( evt instanceof HCI_ConnectionComplete) {
+		} else if ( evt instanceof LE_AdvertisingReport) {
+			final LE_AdvertisingReport le_ar = (LE_AdvertisingReport) evt;
+			Date timeOfCapture = new Date(); // current time
+			return this.handle_LE_AdvertisingReport( le_ar, timeOfCapture);
+		} else {
+			logger.warning( "unhandled event: " + evt.toString());
+		}
+		return true;
+	}
+	
+	/***
+	 * to parse and narrow incoming HCI events and testing the status value for some HCI_Events we get back from hcitool.
+	 * This routine is called for every incoming event, independent of additional event handlers onEvent().
+	 * 
 	 * @param hciEvent
+	 * 
+	 * @return null if event needs no further handling or the possibly parsed/narrowed event.
 	 */
 	private static HCI_Event handleHCIEvent( final String hciEvent) {
 		try {
+			
 			HCI_Event hciEvt = new HCI_Event(hciEvent).parse();
 			// System.err.println("HCI_Event: " + hciEvt.toString());
+			
 			if ( hciEvt instanceof HCI_CommandComplete) {
+				
 				byte status = ((HCI_CommandComplete) hciEvt).getStatus();
 				if ( status != 0x00) {
 					HCI_Command.ErrorCode ec = HCI_Command.getErrorCode(status);
-					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI Event: %s", ec.code, ec.name, hciEvt.toString()));
+					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI_CommandComplete: %s", ec.code, ec.name, hciEvt.toString()));
 				}
-				return hciEvt;
-			} else if ( hciEvt instanceof HCI_InquiryComplete) {
-			} else if ( hciEvt instanceof HCI_InquiryResult) {
-			} else if ( hciEvt instanceof HCI_ConnectionComplete) {
+				return null; // no further handling of event...
+				
 			} else if ( hciEvt instanceof HCI_CommandStatus) {
+				
 				byte status = ((HCI_CommandStatus) hciEvt).getStatus();
 				if ( status != 0x00) {
 					HCI_Command.ErrorCode ec = HCI_Command.getErrorCode(status);
-					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI Event: %s", ec.code, ec.name, hciEvt.toString()));
+					logger.severe( String.format( "error 0x%02x, \"%s\" in HCI_CommandStatus: %s", ec.code, ec.name, hciEvt.toString()));
 				}
-				return hciEvt;
+				return null; // no further handling of event...
+				
+			} else if ( hciEvt instanceof HCI_InquiryComplete) {
+				logger.info( "HCI_InquiryComplete: " + hciEvt.toString());
+			} else if ( hciEvt instanceof HCI_InquiryResult) {
+				logger.info( "HCI_InquiryResult: " + hciEvt.toString());
+			} else if ( hciEvt instanceof HCI_ConnectionComplete) {
+				logger.info( "HCI_ConnectionComplete: " + hciEvt.toString());
+			} else if ( hciEvt instanceof LE_AdvertisingReport) {
+				// we get an incoming LE_AdvertisingReport while advertising?
+				logger.info( "LE_AdvertisingReport: " + hciEvt.toString());
+				logger.info( hciEvt.toString());
 			} else {
-				logger.severe( "HCI_Event: " + hciEvt.toString());
-				logger.severe( "unhandled HCI Event in HCI response");
+				logger.warning( "No narrowing for HCI_Event in HCI response: " + hciEvt.toString());
 			}
+			return hciEvt;
+			
 		} catch (Exception e) {
 			e.printStackTrace();
+			return null;
 		}
-		return null;
+		
 	}
 	
 	/***
@@ -628,8 +745,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	 * 
 	 * @param script
 	 * @param envVars array of strings passed to the script as environment variables, format is "ENV_VAR_NAME=value"
-	 * @param eventHandler upcall to handle each event.
-	 * @param lineHandler to handle all lines which are not part of an "> HCI Event"
+	 * @param eventHandler up-call for specialized event handling.
+	 * @param lineHandler to handle all lines which are not part of an "> HCI Event" response string from HCI.
 	 * 
 	 * @return success/failure
 	 */
@@ -664,7 +781,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 						sb.append(s);		
 						HCI_Event evt = handleHCIEvent( sb.toString());
 						// callback for the event
-						if ( eventHandler != null) {
+						if ( evt != null && eventHandler != null) {
 							eventHandler.onEvent( evt);
 						}
 						sb = null;							
@@ -721,21 +838,6 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		return arr;
 	}
 	
-	@Override
-	public boolean onEvent( HCI_Event evt) {
-		if ( evt instanceof HCI_CommandComplete) {
-			byte status;
-			try {
-				status = ((HCI_CommandComplete) evt).getStatus();
-				if ( status != 0x00) {
-					// failure.
-				}
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-		}
-		return true;
-	}
 		
 	/***
 	 * almost periodically, we change the blue-tooth address of the device and the proximity identifier.
@@ -767,56 +869,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			
 	}
 	
-	/*** 
-	 * callback during parsing of a hcidump trace file
-	 */
-	@Override
-	public boolean onPDU( HCI_PDU pdu) {
-		
-		if ( pdu instanceof LE_AdvertisingReport) {
-			
-			Date timeOfCapture = new Date( pdu.getTimeOfCapture());
-			
-			// logger.info( String.format( "LE_AdvertisingReport: %s", timeOfCapture.toString()));
-			
-			// LE_AdvertisingReport can nest multiple advertisement reports...
-			final LE_AdvertisingReport advRep = (LE_AdvertisingReport) pdu;
-			final int nbrReports = advRep.getNumberReports();
-			
-			for ( int i = 0; i < nbrReports; i++) {
-				try {
-					AdvertisingReport ar = advRep.getAdvertisingReport(i);
-					ar = ar.parse();
-					if ( ar instanceof ADV_NONCONN_IND_Report) {
-						// these are the ones we are expecting... try to parse the report further
-						final ADV_NONCONN_IND_Report advNonConnIndRep = ((ADV_NONCONN_IND_Report) ar).parse();
-						if ( advNonConnIndRep instanceof ContactDetectionServiceReport) {
-							
-							// finally we got one...
-							final ContactDetectionServiceReport cdsr = (ContactDetectionServiceReport) advNonConnIndRep;
-						
-							
-							String cdsrPayload = cdsr.getContactDetectionService().toHex( true);
-							int rssi = cdsr.getRSSI();
-														
-							String serviceData = cdsr.getContactDetectionService().serviceDataToHex();
-							
-							logger.info( String.format( "cdsr: %s %s %d", timeOfCapture.toString(), cdsrPayload, rssi));
-							
-							this.idStore.store( serviceData, rssi, timeOfCapture);
-							
-						}
-					} else {
-						
-					}
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}	
-		}
-		
-		return true;
-	}
+	
 	
 	/**
 	 * 
@@ -1019,7 +1072,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			
 			final String cmd = "./scripts/beacon_start";
 			
-			boolean status = runScript( cmd, envVars, null, null);
+			// we seem to be getting some unsolicited events...
+			boolean status = runScript( cmd, envVars, this.beacon, null);
 		
 		}
 		
@@ -1305,10 +1359,14 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		 */
 		@Override
 		public void run() {
+			logger.info( "RollingProximityGenerationIndicator run");
 			this.beacon.setChangeAddressFlag( true);
 		}
 		
 	}
+	
+	RollingProximityGenerationIndicator indicatorTask = null;
+	Timer rollingProximityGenerationTimer = null;
 	
 	private void loop() {
 		
@@ -1323,10 +1381,13 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		beaconOnTimer.schedule( beaconOnTask, 0);
 				
 		// a periodic task to indicate change of BT address and renewal of proximity ID.
-		Timer rollingProximityGenerationTimer = new Timer();	
-		long when = System.currentTimeMillis() + ROLLING_PROXIMITY_INTERVAL;
-		RollingProximityGenerationIndicator indicatorTask = new RollingProximityGenerationIndicator( this);			
-		rollingProximityGenerationTimer.scheduleAtFixedRate( indicatorTask, when, ROLLING_PROXIMITY_INTERVAL);
+		// the interval is 10 minutes which if scheduling were real-time should cause distinct
+		// ENINs to be used in proximity ID generation.
+		this.rollingProximityGenerationTimer = new Timer();	
+		this.indicatorTask = new RollingProximityGenerationIndicator( this);	
+		
+		// (task, delay in milli-seconds, period in milli-seconds). note that we are not scheduling on ENIN boundaries...		
+		this.rollingProximityGenerationTimer.scheduleAtFixedRate( this.indicatorTask, ROLLING_PROXIMITY_INTERVAL, ROLLING_PROXIMITY_INTERVAL);
 	
 	}
 	
@@ -1446,9 +1507,17 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		}
 		
 		try {
+			String fn = Beacon.HCI_DUMP_FILE_NAME;
+			File f = new File( fn);
+			if ( f.exists() && !f.delete()) {
+				logger.severe( "failure to delete " + fn);
+			}
+		} catch ( Exception e) {}
+		
+		try {
 			Beacon beacon = new Beacon();
 			
-			boolean TEST_PARSER = true;
+			boolean TEST_PARSER = false;
 			
 			if ( TEST_PARSER) {
 				try {

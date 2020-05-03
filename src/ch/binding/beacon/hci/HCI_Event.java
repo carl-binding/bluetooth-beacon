@@ -48,6 +48,31 @@ public class HCI_Event extends HCI_PDU {
 	public static final int HCI_QoS_Setup_Complete = 0x0D;
 	public static final int HCI_Command_Complete = 0x0E;
 	public static final int HCI_Command_Status = 0x0F;
+	public static final int HCI_Hardware_Error = 0x10;
+	public static final int HCI_Flush_Occurred = 0x11;
+	public static final int HCI_Role_Change = 0x12;
+	public static final int HCI_Number_Of_Completed_Packets = 0x13;
+	public static final int HCI_Mode_Change = 0x14;
+	public static final int HCI_Return_Link_Keys = 0x15;
+	public static final int HCI_PIN_Code_Request = 0x16;
+	public static final int HCI_Link_Key_Request = 0x17;
+	public static final int HCI_Link_Key_Notification = 0x18;
+	public static final int HCI_Loopback_Command = 0x19;
+	public static final int HCI_Data_Buffer_Overflow = 0x1A;
+	public static final int HCI_Max_Slots_Change = 0x1B;
+	public static final int HCI_Read_Clock_Offset_Complete = 0x1C;
+	public static final int HCI_Connection_Packet_Type_Changed = 0x1D;
+	public static final int HCI_QoS_Violation = 0x1E;
+	// 0x1F not used ?
+	public static final int HCI_Page_Scan_Repetition_Mode_Change = 0x20;
+	public static final int HCI_Flow_Specification_Complete = 0x21;
+	public static final int HCI_Inquiry_Result_with_RSSI = 0x22;
+	public static final int HCI_Read_Remote_Extended_Features_Complete = 0x23;
+	// some unsed codes ?
+	public static final int HCI_Synchronous_Connection_Complete = 0x2C;
+	public static final int HCI_Synchronous_Connection_Changed = 0x25;
+	// some unsed codes ?
+	public static final int HCI_Sniff_Subrating = 0x2E;
 	
 	// TBD: there are tons more in section 7.7...
 	

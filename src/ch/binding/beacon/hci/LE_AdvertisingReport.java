@@ -82,6 +82,29 @@ public class LE_AdvertisingReport extends LE_MetaEvent {
 			}
 		}
 		
+		static String eventType2Str( byte t) {
+			switch( t) {
+			case ADV_IND:
+				return "ADV_IND";
+			case ADV_DIRECT_IND:
+				return "ADV_DIRECT_IND";
+			case ADV_SCAN_IND:
+				return "ADV_SCAN_IND";
+			case ADV_NONCONN_IND:
+				return "ADV_NONCONN_IND";
+			case SCAN_RSP:
+				return "SCAN_RSP";
+			default:
+				return "unknown advertising report event type " + Byte.toString( t);
+			}
+		}
+		
+		@Override
+		public String toString() {
+			StringBuffer sb = new StringBuffer();
+			sb.append( String.format( "AdvertisingReport: %s", eventType2Str( this.eventType)));
+			return sb.toString();
+		}
 		
 	}
 	
@@ -171,6 +194,7 @@ public class LE_AdvertisingReport extends LE_MetaEvent {
 	public String toString() {
 		return String.format( "LE_AdvertisingReport: nbrReports: %02d", this.numberReports);
 	}
+	
 	// 2.3.1.1 ADV_IND, page 2873
 	public static class ADV_IND_Report extends AdvertisingReport {
 		

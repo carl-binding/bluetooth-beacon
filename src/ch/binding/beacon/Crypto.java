@@ -375,6 +375,9 @@ public class Crypto {
 		return Crypto.rollingProximityID;
 	}
 	
+	/***
+	 * ENIN of currently active proximity ID
+	 */
 	private static long eninOfProximityIDGeneration = 0;
 	
 	/***
@@ -403,7 +406,6 @@ public class Crypto {
 		if ( tek != null && enin < 0) {
 			throw new IllegalArgumentException();
 		}
-		// when no key is given, no enin is needed either. we take the current time and key
 		if ( tek == null && enin >= 0) {
 			throw new IllegalArgumentException();
 		}
@@ -413,10 +415,21 @@ public class Crypto {
 		Crypto.init();
 		
 		if ( enin < 0) {
+			// we will generate a new proximity ID...
+			assert( tek == null);
 			final long now = System.currentTimeMillis()/1000; // secs
 			enin = getENIntervalNumber( now);
-			eninOfProximityIDGeneration = enin;
-		}
+			
+			logger.info( String.format( "generating PROXIMITY_ID, ENIN = %d", enin));
+			
+			// we should not generate multiple proximity IDs in same ENIN intervals...
+			// but real-time scheduling is not a UNIX forte.
+			if ( enin == Crypto.eninOfProximityIDGeneration) {
+				logger.severe( String.format( "triggering duplicate proximity ID generation in ENIN: %d", enin));
+			}
+			Crypto.eninOfProximityIDGeneration = enin;
+		} 
+		assert( enin > 0);
 		
 		byte padding[] = new byte[16];
 		
@@ -560,14 +573,19 @@ public class Crypto {
 		byte rpi[] = null;
 		
 		if ( tek == null && enin < 0) {
+			// we want to use the currently valid ENIN and key...
 			
 			final long now = System.currentTimeMillis()/1000; // secs
 			enin = getENIntervalNumber( now);
-			if ( enin != Crypto.eninOfProximityIDGeneration) {
-				throw new Exception( "ENIN out of sync with proximity ID");
-			}
 			
-			rpi = getRollingProximityID();	
+			// we assume that ENINs are in-line. although it can be that, when encrypting the meta-data we
+			// just crossed an ENIN interval line... thus a difference of 1 is ok. 
+			if (( enin - Crypto.eninOfProximityIDGeneration) > 1) {
+				logger.severe( String.format( "ENIN differ: %d %d", enin, Crypto.eninOfProximityIDGeneration));
+			};
+			
+			rpi = getRollingProximityID( );	
+			
 		} else if ( tek != null && enin >= 0) {
 			rpi = getRollingProximityID( tek, enin);
 		}
