@@ -23,7 +23,7 @@ package ch.binding.beacon;
  * @author carl
  *
  */
-interface KeyStore {
+public interface KeyStore {
 	
 	/***
 	 * 

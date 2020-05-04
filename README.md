@@ -8,11 +8,11 @@ There probably are plenty of remaining bugs, be it in the application of the cry
 
 Interfacing to BLE on Linux using the bluez command line tools makes the whole thing ugly and brittle. I just didn't have the stomach to wade through the bluez sources, rip out the needed C code and make it Java accessible.
 
-Clearly, in order to implement a real Corona virus exposure tracking app, much more is needed. And the implementation needs to run on Android and iOS - environments which I have not programmed against. A Linux box was all I had to play with and a feasibility prototype was the goal.
+Clearly, in order to implement a real Corona virus exposure tracking app, much more is needed. And the implementation needs to run on Android and iOS - environments which I have not programmed against and which definitely are a change from good old UNIX.... A Linux box was all I had to play with and a feasibility prototype was the goal.
 
 Using an USB BLE dongle might have made certain things easier. Command line bluez tools required some shell-scripting which is syntactically painful and brittle during execution. 
 
-There is no persistent and secure saving of detected exposure notifications. The currently implemented storage scheme for temporary exposure keys is insecure.
+There now is some SQLite storage for temporary exposure keys and proximity IDs. AES encrypted exposure keys can be activated - not tested. Storage is not space optimized. There is support for purging the temp exposure keys and proximity ID stores, not really tested.
 
 There is no support to match exposure notifications deemed positive with detected, locally stored, and health-authority published, exposure notifications. Hence also no attempt to communicate with any back-end (though it's not for lack of available technologies).
 

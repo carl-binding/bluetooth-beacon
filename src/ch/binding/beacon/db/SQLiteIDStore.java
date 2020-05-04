@@ -49,7 +49,7 @@ public class SQLiteIDStore implements ProximityIDStore {
 		
 		this.dbURL = "jdbc:sqlite:" + fn;
 		
-		logger.info( String.format( "dbURL: %s", this.dbURL));
+		// logger.info( String.format( "dbURL: %s", this.dbURL));
 		
 	}
 	
@@ -59,7 +59,7 @@ public class SQLiteIDStore implements ProximityIDStore {
         try {
             conn = DriverManager.getConnection( this.dbURL);
         } catch (SQLException e) {
-            System.out.println(e.getMessage());
+            logger.severe(e.getMessage());
         }
         return conn;
     }
@@ -134,7 +134,7 @@ public class SQLiteIDStore implements ProximityIDStore {
 	            	
 	            }
 	        } catch (SQLException e) {
-	            System.out.println(e.getMessage());
+	            logger.severe(e.getMessage());
 	            return false;
 	        } finally {
 	        }
@@ -149,18 +149,45 @@ public class SQLiteIDStore implements ProximityIDStore {
 		if ( ts >= System.currentTimeMillis()) {
 			throw new IllegalArgumentException();
 		}
-		// TODO Auto-generated method stub
+		String sql = "delete from Encounters where (last_toc < ?)";
+		try (Connection conn = this.connect(); 
+				PreparedStatement pstmt = conn.prepareStatement(sql);) {
+
+			pstmt.setLong( 1, ts);
+			pstmt.executeUpdate();
+
+		} catch (SQLException e) {
+			logger.severe(e.getMessage());
+			return false;
+		} finally {
+		}
 		return true;
 	}
 
 	@Override
-	public boolean purgeEphemerousEncounters(long duration, Date before) {
+	public boolean purgeEphemeralEncounters( long duration, Date before) {
 		long ts = before.getTime();
 		final long now = System.currentTimeMillis();
 		if ( now - ts <= duration) {
 			throw new IllegalArgumentException( "before time-stamp not sufficiently far back in time...");
 		}
-		// TODO Auto-generated method stub
+		
+		String sql = "delete from Encounters where (last_toc < ?) and ((last_toc - first_toc) < ?)";
+		
+		try (Connection conn = this.connect(); 
+				PreparedStatement pstmt = conn.prepareStatement(sql);) {
+
+			pstmt.setLong( 1, ts);
+			pstmt.setLong( 2, duration);
+			
+			pstmt.executeUpdate();
+
+		} catch (SQLException e) {
+			logger.severe(e.getMessage());
+			return false;
+		} finally {
+		}
+		
 		return true;
 	}
 

@@ -40,6 +40,7 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import at.favre.lib.crypto.HKDF;
+import ch.binding.beacon.db.SQLiteKeyStore;
 
 public class Crypto {
 	
@@ -49,20 +50,28 @@ public class Crypto {
 		
 	static private KeyStore keyStore = null;
 	
+	// switch between file based key store or SQLite based key store
+	static private boolean USE_DB = true;
+	
 	static private void init() {
 		
 		if ( keyStore != null)
 			return;
-				
-		String cwd = System. getProperty("user.dir");
-		String keyStoreFileName = cwd + File.separator + KEY_STORE_FN;
 		
-		try {
-			keyStore = new FileKeyStore( keyStoreFileName);
-		} catch ( Exception e) {
-			e.printStackTrace();
-			logger.severe( e.getMessage());
-			System.exit( -1);
+		if ( USE_DB) {
+			keyStore = new SQLiteKeyStore( Beacon.getPWD(), Beacon.getDBFN());
+		} else {
+			// file based
+			String cwd = System. getProperty("user.dir");
+			String keyStoreFileName = cwd + File.separator + KEY_STORE_FN;
+		
+			try {
+				keyStore = new FileKeyStore( keyStoreFileName);
+			} catch ( Exception e) {
+				e.printStackTrace();
+				logger.severe( e.getMessage());
+				System.exit( -1);
+			}
 		}
 		
 	}
@@ -70,7 +79,6 @@ public class Crypto {
 	static {
 		init();
 	}
-
 	
 	static final int VERSION = 2;
 	
@@ -185,7 +193,7 @@ public class Crypto {
 	 * @param dayNumber
 	 * @return the index of the 10 minutes interval on the given day
 	 */
-	 static char getTimeIntervalNumber( long dayNumber) {
+	 public static char getTimeIntervalNumber( long dayNumber) {
 		long now = System.currentTimeMillis();
 		long startOfDay = dayNumber * 60 * 60 * 24; // seconds
 		long secondsOfDay = (now/1000) - startOfDay;
@@ -222,7 +230,7 @@ public class Crypto {
 	 * @return a number for each 10 minute time window that’s shared between all devices
 	 *  in the protocol. These time windows are derived from timestamps in Unix Epoch Time.
 	 */
-	static long getENIntervalNumber( long secsSinceEpoch) {
+	public static long getENIntervalNumber( long secsSinceEpoch) {
 		return secsSinceEpoch/(60 * 10);
 	}
 	
@@ -602,6 +610,18 @@ public class Crypto {
 		
 		return encryptedMetadata;
 		
+	}
+
+	/***
+	 * 
+	 * @param before time-stamp, milli-secs
+	 * @return success/failure
+	 */
+	public static boolean purgeObsoleteTempExpKeys(long before) {
+		long beforeENIN = Crypto.getENIntervalNumber( before/1000);
+		if ( Crypto.keyStore == null)
+			return false;
+		return Crypto.keyStore.purge( beforeENIN);
 	}
 
 	

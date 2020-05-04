@@ -68,12 +68,20 @@ import javax.crypto.NoSuchPaddingException;
 
 public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	
+	private static final long ONE_MIN_MSECS = 60 * 1000;
+	private static final long ONE_HR_MSECS = 60 * ONE_MIN_MSECS;
+	private static final long ONE_DAY_MSECS = 24 * ONE_HR_MSECS;
+	
 	/***
 	 * file name for properties
 	 */
 	static final String PROPERTIES_FILE_NAME = "beacon.properties";
 	
 	static final String DB_FN = "/home/carl/workspace/beacon/sqlite/proximity_id_store.db";
+	
+	static String getDBFN() {
+		return DB_FN;
+	}
 	
 	/***
 	 * we save output of hcidump into a file when scanning for other beacons
@@ -558,12 +566,12 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		return sb.toString();
 	}
 	
-	static Logger logger = Logger.getLogger(Beacon.class.getName());
+	private static Logger logger = Logger.getLogger(Beacon.class.getName());
 
 	// properties for the application
 	private static Properties appProps;
 	
-	public static Properties getProps() {
+	static Properties getProps() {
 		return appProps;
 	}
 	
@@ -598,6 +606,13 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	 * @return success/failure
 	 */
 	private boolean handle_LE_AdvertisingReport( LE_AdvertisingReport advRep, Date timeOfCapture) {
+		
+		if ( this.getAppType() == Beacon.AppType.I_BEACON)
+			return true;
+		if ( this.idStore == null) {
+			logger.warning( "no ID store when handling LE_AdvertisingReport");
+			return false;
+		}
 		
 		final int nbrReports = advRep.getNumberReports();
 		
@@ -817,11 +832,30 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	}
 	
 	
+	/***
+	 * null in case of iBeacon.
+	 */
 	private ProximityIDStore idStore = null;
 	
-	public Beacon() throws Exception {
+	// to encrypt temp exposure keys
+	private static String pwd = null;
+	
+	/**
+	 * 
+	 * @return password of Beacon, can be null.
+	 */
+	static String getPWD() {
+		return pwd;
+	}
+	
+	public Beacon( String pwd) throws Exception {
 		super();
-		this.idStore = new SQLiteIDStore( Beacon.DB_FN);
+		Beacon.pwd = pwd;
+		if (this.getAppType() == Beacon.AppType.APPLE_GOOGLE_CONTACT_TRACING) {
+			this.idStore = new SQLiteIDStore( Beacon.DB_FN);
+		} else {
+			this.idStore = null;
+		}
 	}
 
 	private static byte [] getBTRandomNonResolvableAddress() {
@@ -1187,6 +1221,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			this.beacon.setState( State.IDLE);
 			
 			// we only set a flag to change address since this can only be done when Bluetooth is idle....
+			// and now can test the flag and do it...
 			if ( this.beacon.getChangeAddressFlag()) {
 				this.beacon.setChangeAddressFlag( false);
 				
@@ -1206,6 +1241,9 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 				}
 						
 			}
+			
+			// when we go idle we attempt to purge the stores.
+			this.beacon.purge();
 			
 			// schedule the beaconOnTask to start advertising again.
 			
@@ -1319,7 +1357,6 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			
 			boolean status = runScript( cmd, envVars, null, null);
 			
-			
 		}
 
 		@Override
@@ -1391,12 +1428,195 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	
 	}
 	
+	/**
+	 * how often do we try to purge ephemeral encounters?
+	 */
+	private static long PURGE_EPHEMERAL_IDS_INTERVAL = 30 * ONE_MIN_MSECS; // milli-secs
+	/***
+	 * how often do we try to purge old temporary exposure keys?
+	 */
+	private static long PURGE_TEMP_EXP_KEYS_INTERVAL = 24 * ONE_HR_MSECS; // milli-secs
+	/***
+	 * how often do we try to purge old exposure IDs?
+	 */
+	private static long PURGE_EXP_IDS_INTERVAL = 24 * ONE_HR_MSECS; // milli-secs
+	
+	/**
+	 * time-stamp of last purge of obsolete temporary exposure keys.
+	 */
+	private long purgedObsoleteTempExpKeysTS = 0;
+	
+	/***
+	 * time-stamp of last purge of ephemeral exposure IDs
+	 */
+	private long purgedEphemeralIDsTS = 0;
+	
+	/***
+	 * time-stamp of last purge of obsolete exposure IDs.
+	 */
+	private long purgedObsoleteExposureIDsTS = 0;
+	
+	private void setPurgedObsoleteTempExpKeysTS( long ts) {
+		this.purgedObsoleteTempExpKeysTS = ts;
+	}
+	
+	private void setPurgedEphemeralIDsTS( long ts) {
+		this.purgedEphemeralIDsTS = ts;
+	}
+	
+	private void setPurgedObsoleteExposureIDsTS( long ts) {
+		this.purgedObsoleteExposureIDsTS = ts;
+	}
+	
+	private long getPurgedObsoleteTempExpKeysTS() {
+		return this.purgedObsoleteTempExpKeysTS;
+	}
+	
+	private long getPurgedEphemeralIDsTS() {
+		return this.purgedEphemeralIDsTS;
+	}
+	
+	private long getPurgedObsoleteExposureIDsTS() {
+		return this.purgedObsoleteExposureIDsTS;
+	}
+
+	private static long getPurgeEphemeralIDsInterval() {
+		return PURGE_EPHEMERAL_IDS_INTERVAL;
+	}
+	
+	private static long getPurgeTempExpKeysInterval() {
+		return PURGE_TEMP_EXP_KEYS_INTERVAL;
+	}
+	
+	private static long getPurgeExpIDsInterval() {
+		return PURGE_EXP_IDS_INTERVAL;
+	}
+	
+	/***
+	 * when an exposure is shorter than that duration (ephemeral), we eventually purge it
+	 * in the minutes range
+	 */
+	private static long MIN_DURATION_OF_EXPOSURE = 3 * ONE_MIN_MSECS; // milli-secs
+	
+	/***
+	 * we keep ephemeral exposures for some time, in the hour range
+	 */
+	private static long DURATION_KEEP_EPHEMERAL_EXPOSURE = 3 * ONE_HR_MSECS; // milli-secs
+	
+	/***
+	 * how long do we keep exposure IDs? talking about days here...
+	 */
+	private static long DURATION_KEEP_EXPOSURE_IDS = 21 * ONE_DAY_MSECS; // milli-secs
+	
+	/***
+	 * how long do we keep our own temporary exposure keys? talking about days here...
+	 */
+	private static long DURATION_KEEP_TEMP_EXP_KEYS = DURATION_KEEP_EXPOSURE_IDS;
+	
+	static long getDurationKeepTempExpKeys() {
+		return DURATION_KEEP_TEMP_EXP_KEYS;
+	}
+	
+	static long getDurationKeepEphemeralExposures() {
+		return DURATION_KEEP_EPHEMERAL_EXPOSURE;
+	}
+	
+	static long getMinDurationOfExposure() {
+		return MIN_DURATION_OF_EXPOSURE;
+	}
+	
+	static long getDurationKeepExposureIDs() {
+		return DURATION_KEEP_EXPOSURE_IDS;
+	}
+
+	/***
+	 * purge wweks old temporary exposure keys.
+	 * @param now time-stamp, milli-secs since EPOCH.
+	 */
+	private void purgeObsoleteTempExpKeys( long now) {
+		long beforeTS = now - getDurationKeepTempExpKeys();
+		if ( Crypto.purgeObsoleteTempExpKeys( beforeTS)) {
+			// set time-stamp of last purge
+			setPurgedObsoleteTempExpKeysTS( now);
+		} else {
+			logger.warning( "failed to purge temporary exposure keys");
+		}
+	}
+	
+	/***
+	 * exposures which were too short and lie in the past can be deleted.
+	 * @param now
+	 */
+	private void purgeEphemeralIDs( long now) {
+		assert( this.getAppType() == Beacon.AppType.APPLE_GOOGLE_CONTACT_TRACING);
+		long beforeTS = now - getDurationKeepEphemeralExposures();
+		if ( !this.idStore.purgeEphemeralEncounters( getMinDurationOfExposure(), new Date( beforeTS))) {
+			logger.warning( "failure to purge ephemeral encounters");
+		} else {
+			setPurgedEphemeralIDsTS( now);
+		};		
+	}
+	
+	
+	/***
+	 * exposures of weeks ago can be purged...
+	 * 
+	 * @param now
+	 */
+	private void purgeObsoleteExposureIDs( long now) {
+		assert( this.getAppType() == Beacon.AppType.APPLE_GOOGLE_CONTACT_TRACING);
+		long beforeTS = now - getDurationKeepExposureIDs();
+		if ( !this.idStore.purge( new Date( beforeTS))) {
+			logger.warning( "failure to purge old exposures");
+		} else {
+			setPurgedObsoleteExposureIDsTS( now);
+		}
+	}
+	
+	/***
+	 * invoked during IDLE phase to cleanse out key-store and proximity-id-store
+	 */
+	void purge() {
+				
+		long now = System.currentTimeMillis();
+		
+		// when sending out I_BEACON we do change the UUID based on temp exposure keys
+		// and thus need to purge these occasionally....
+		if ( now - getPurgedObsoleteTempExpKeysTS() > getPurgeTempExpKeysInterval()) {
+			purgeObsoleteTempExpKeys( now);
+		}
+		
+		// when in I_BEACON MODE, we don't store any IDs...
+		if ( this.getAppType() == Beacon.AppType.I_BEACON) {
+			return;
+		}
+		
+		if ( now - getPurgedEphemeralIDsTS() > getPurgeEphemeralIDsInterval()) {
+			purgeEphemeralIDs( now);			
+		}
+		
+		if ( now - getPurgedObsoleteExposureIDsTS() > getPurgeExpIDsInterval()) {
+			purgeObsoleteExposureIDs( now);
+		}
+	}
+
+	/***
+	 * time-stamp of Becaon cycle start
+	 */
 	private long startTime = System.currentTimeMillis();
 	
+	/***
+	 * to set the time-stamp of Beacon cycle start
+	 * @param ts time-stamp, milli-secs
+	 */
 	public void setStartTime(long ts) {
 		this.startTime = ts;		
 	}
 	
+	/***
+	 * 
+	 * @return start time-stamp of last Beacon cycle start, milli-secs
+	 */
 	public long getStartTime() {
 		return this.startTime;
 	}
@@ -1432,11 +1652,13 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		
 	public static void main(String[] args) {
 		
-		/*
+		
+		String pwd = null;
+		
 		// create Options object
 		Options options = new Options();
 		// add p option for SUDO pwd
-		options.addOption("p", "pwd", true, "user's SUDO password");
+		options.addOption("p", "pwd", true, "user's beacon password");
 		// command line -p=<sudo password>
 		// configure project run-time arguments settings
 		CommandLineParser parser = new DefaultParser();
@@ -1444,21 +1666,18 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			CommandLine cmd = parser.parse( options, args);
 			
 			if ( cmd.hasOption('p')) {
-				String sudoPwd = cmd.getOptionValue("p");
-				if ( sudoPwd == null || sudoPwd.length() == 0) {
-					System.err.println( "empty SUDO password");
-				}
-				Sender.setSudoPwd( sudoPwd);
+				pwd = cmd.getOptionValue("p");
+				if ( pwd == null || pwd.length() == 0) {
+					System.err.println( "no password in -p option");
+					System.exit( -1);
+				} 
 			} else {
-				System.err.println( "missing SUDO password option 'p'");
-				System.exit( -1);
 			}
 		} catch (ParseException e) {
 			System.err.println( "failure to parse command line options");
 			e.printStackTrace();
 			System.exit( -1);
 		}
-		*/
 		
 		String cwd = System. getProperty("user.dir");
 		logger.info( "current working directory: " + cwd);	
@@ -1515,7 +1734,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		} catch ( Exception e) {}
 		
 		try {
-			Beacon beacon = new Beacon();
+			Beacon beacon = new Beacon( pwd);
 			
 			boolean TEST_PARSER = false;
 			

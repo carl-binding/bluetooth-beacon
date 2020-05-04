@@ -34,6 +34,8 @@ public interface ProximityIDStore {
 	 * 
 	 * @param rssi the Received Signal Strength Indication of the received BLE advertising (for whatever it is worth).
 	 * 
+	 * @param timeOfCapture time-stamp
+	 * 
 	 * @return success/failure
 	 */
 	public boolean store( String serviceData, int rssi, Date timeOfCapture);
@@ -52,11 +54,11 @@ public interface ProximityIDStore {
 	 * that is, if we see an rolling proximity identifier for less that the duration, we consider
 	 * the exposure to be too short to be relevant from an infection point of view and can purge it.
 	 * 
-	 * @param duration if the encounter is shorter than duration, it will be dropped.
+	 * @param duration if the encounter is shorter than duration, it will be dropped. milli-seconds
 	 * @param before only consider encounters of which the last time of capture is before the given date, which
 	 * 		should be sufficiently back in the past. That is, before should be < now - duration.
 	 */
-	public boolean purgeEphemerousEncounters( long duration, Date before);
+	public boolean purgeEphemeralEncounters( long duration, Date before);
 	
 	
 
