@@ -24,3 +24,12 @@ As long as there are no widely-available, easy-to-use, and affordable testing me
 
 
 
+## Add-ons
+
+- Investigated the DP-3T effort a bit. These proposals are similar in nature to other PACT proposals. The white-paper proposes 3 schemes; it is unclear which one is used without glimpsing at the Ubique code.
+- The "low-cost decentralized proximity tracing" proposed by DP-3T is similar to the first version of the Google & Apple proposal - which has been changed since in various aspects (Daily random seeds, AES encryption, meta-data encryption)
+- The BLE interfaces on Android are evidently not as close to the Bluetooth specs 5.3  as those that Linux offers. Endless Java APIs to wade through to get to the bits. And Apple iOS makes it seemingly even harder to just send out BLE advertisements.
+- The handling of TX power remains a somewhat open issue. Distance estimation will be inaccurate by the laws of nature, specifically propagation of electromagnetic waves in a disturbed environment.
+- Various bug fixes. 
+  - clean up of the use of Timer threads à la Java.
+  - LSB encoding of service UUIDs

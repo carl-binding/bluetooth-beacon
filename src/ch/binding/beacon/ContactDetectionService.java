@@ -30,7 +30,8 @@ public class ContactDetectionService  {
 	
 	// https://blog.google/documents/58/Contact_Tracing_-_Bluetooth_Specification_v1.1_RYGZbKW.pdf
 	
-	// 2 byte Bluetooth service UUID
+	// 2 byte Bluetooth service UUID. this 16 bit service UUID has 
+	// been reserved by Apple Inc from the Bluetooth organization as per March 27, 2020
 	public static final int CONTACT_DETECTION_SERVICE_UUID = 0xFD6F;
 	
 	// payload is the rolling proximity UUID, i.e. 16 bytes
@@ -125,6 +126,7 @@ public class ContactDetectionService  {
 			this.serviceUUID[1] = data[6];
 			
 			this.serviceDataLen = data[7];
+			assert( this.serviceDataLen == 0x13 || this.serviceDataLen == 0x17);
 			this.serviceDataType = data[8];
 			
 			this.serviceDataUUID = new byte[2]; 
@@ -175,13 +177,23 @@ public class ContactDetectionService  {
 		
 		data[idx++] = 0x03;  // len service UUID
 		data[idx++] = 0x03;  // type service UUID
-		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF);  	// service UUID
-		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID) & 0xFF);			// service UUID
+		// note this is LSB...
+		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID) & 0xFF);			// service UUID, LSB
+		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF);  	// service UUID, MSB
 		
-		data[idx++] = 0x13;  // len service data
+		
+		int serviceDataLen = serviceData.length + 3; // incl type & uuid, but not len
+		if ( encryptedMetaData != null)
+			serviceDataLen += encryptedMetaData.length;
+		
+		assert( serviceDataLen == 0x13 || serviceDataLen == 0x17);
+		
+		data[idx++] = (byte) (serviceDataLen & 0xFF); // 0x13;  // len service data
 		data[idx++] = 0x16;  // type service data
-		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF); 	// service UUID
-		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID) & 0xFF);			// service UUID
+		// note this is LSB...
+		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID) & 0xFF);			// service UUID, LSB
+		data[idx++] = (byte) ((CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF); 	// service UUID, MSB
+		
 		
 		System.arraycopy(serviceData, 0, data, idx, serviceData.length);
 		idx += serviceData.length;

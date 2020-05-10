@@ -52,7 +52,7 @@ implements KeyStore {
         try {
             conn = DriverManager.getConnection( this.dbURL);
         } catch (SQLException e) {
-            System.out.println(e.getMessage());
+            System.err.println(e.getMessage());
         }
         return conn;
     }

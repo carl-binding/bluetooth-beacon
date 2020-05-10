@@ -54,6 +54,7 @@ import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_NONCONN_IND_Report;
 import ch.binding.beacon.hci.LE_AdvertisingReport.ADV_SCAN_IND_Report;
 import ch.binding.beacon.hci.LE_AdvertisingReport.AdvertisingReport;
 import ch.binding.beacon.hci.LE_AdvertisingReport.ContactDetectionServiceReport;
+import ch.binding.beacon.hci.LE_AdvertisingReport.DP3TServiceReport;
 import ch.binding.beacon.hci.LE_AdvertisingReport.SCAN_RSP_Report;
 
 import java.util.logging.FileHandler;
@@ -92,8 +93,9 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	
 	// iBeacon stuff
 	
-	// Bluetooth company IDs. see bluetooth.com
+	// Bluetooth company IDs. see bluetooth.com. LSB order of 16 bit hex value
 	public static final String APPLE_ID = "4C 00";
+	public static final String GOOGLE_ID = "E0 00";
 	public static final String IBM_ID = "03 00";
 	
 	public static final String APPLE_IBEACON_PREFIX = "1a ff 4c 00 02 15";
@@ -623,11 +625,13 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 				// further narrow the AdvertisingReport...
 				ar = ar.parse();
 				
+				
 				if ( ar instanceof ADV_NONCONN_IND_Report) {
 					
 					// these are the ones we are expecting for contact tracing... try to parse the report further
 					final ADV_NONCONN_IND_Report advNonConnIndRep = ((ADV_NONCONN_IND_Report) ar).parse();
 					
+					// this is the case for the Apple & Google protocol
 					if ( advNonConnIndRep instanceof ContactDetectionServiceReport) {
 						
 						// finally we got a contact detection event...
@@ -642,6 +646,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 						
 						this.idStore.store( serviceData, rssi, timeOfCapture);
 						
+					} else if ( advNonConnIndRep instanceof DP3TServiceReport) {
+						// DP3T protocol
 					} else {
 						// logger.info( "ADV_NONCONN_IND: not a ContactDetectionServiceReport: " + ar.toString());
 					}
@@ -848,6 +854,8 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		return pwd;
 	}
 	
+	
+	
 	public Beacon( String pwd) throws Exception {
 		super();
 		Beacon.pwd = pwd;
@@ -902,7 +910,6 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		}
 			
 	}
-	
 	
 	
 	/**
@@ -1111,6 +1118,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		
 		}
 		
+		
 		@SuppressWarnings("deprecation")
 		@Override
 		public void run() {
@@ -1154,9 +1162,10 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			this.turnBeaconOn( rollingProxyID);		
 			this.beacon.setState( State.ADVERTISING);
 			
+			
 			// schedule the task to turn beacon off			
 			BeaconOff beaconOffTask = new BeaconOff( this.beacon);	
-			new Timer().schedule( beaconOffTask, Beacon.getBeaconAdvertisingDuration());
+			this.beacon.beaconTimer.schedule( beaconOffTask, Beacon.getBeaconAdvertisingDuration());
 			
 		}
 		
@@ -1211,6 +1220,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			
 		}
 		
+		
 		@Override
 		public void run() {
 			
@@ -1256,13 +1266,15 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 				logger.info( "no time to idle: idleDuration <= 0: " + Long.toString( idleDuration));
 				idleDuration = 0;
 			}
+		
 			BeaconOn beaconOnTask = new BeaconOn( this.beacon);	
-			new Timer().schedule( beaconOnTask, idleDuration);
+			this.beacon.beaconTimer.schedule( beaconOnTask, idleDuration);
 			
 			
 		}
 		
 	}
+	
 	static class BeaconOff extends TimerTask
 	implements ScriptLineHandler {
 		
@@ -1358,7 +1370,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			boolean status = runScript( cmd, envVars, null, null);
 			
 		}
-
+		
 		@Override
 		public void run() {
 			
@@ -1366,13 +1378,14 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			
 			logger.info( "BeaconOff");	
 			
+			
 			turnBeaconOff();				
 			turnScanningOn();
 			this.beacon.setState( State.SCANNING);
 						
 			// schedule the idling task.
 			BeaconIdle beaconIdleTask = new BeaconIdle( this.beacon);
-			new Timer().schedule( beaconIdleTask, Beacon.getBeaconScanningDuration());
+			this.beacon.beaconTimer.schedule( beaconIdleTask, Beacon.getBeaconScanningDuration());
 
 		}		
 	}
@@ -1402,29 +1415,42 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		
 	}
 	
-	RollingProximityGenerationIndicator indicatorTask = null;
-	Timer rollingProximityGenerationTimer = null;
+	// after RTFM regd. timers: we have to timers i.e. threads which schedule multiple tasks
 	
+	/***
+	 * timer thread scheduling periodic tasks to trigger generation of new proximity IDs
+	 * and BT random addresses
+	**/
+	private Timer rollingProximityGenerationTimer = null;
+	
+	/**
+	 * the main timer thread which schedules the advertising, scanning and idling tasks in
+	 * a round-robin fashion.
+	 */
+	private Timer beaconTimer = null;
+	
+		
 	private void loop() {
 		
 		// the very first thing we do is to change BT address if needed
 		if ( this.useRandomAddr()) {
 			this.changeBTAddress();
 		}
+	
 		
 		// schedule the BeaconOnTask which will then start the beacon cycle.
-		Timer beaconOnTimer = new Timer();
+		this.beaconTimer = new Timer();
 		BeaconOn beaconOnTask = new BeaconOn( this);		
-		beaconOnTimer.schedule( beaconOnTask, 0);
+		this.beaconTimer.schedule( beaconOnTask, 0);
 				
 		// a periodic task to indicate change of BT address and renewal of proximity ID.
 		// the interval is 10 minutes which if scheduling were real-time should cause distinct
 		// ENINs to be used in proximity ID generation.
 		this.rollingProximityGenerationTimer = new Timer();	
-		this.indicatorTask = new RollingProximityGenerationIndicator( this);	
+		TimerTask indicatorTask = new RollingProximityGenerationIndicator( this);	
 		
 		// (task, delay in milli-seconds, period in milli-seconds). note that we are not scheduling on ENIN boundaries...		
-		this.rollingProximityGenerationTimer.scheduleAtFixedRate( this.indicatorTask, ROLLING_PROXIMITY_INTERVAL, ROLLING_PROXIMITY_INTERVAL);
+		this.rollingProximityGenerationTimer.scheduleAtFixedRate( indicatorTask, ROLLING_PROXIMITY_INTERVAL, ROLLING_PROXIMITY_INTERVAL);
 	
 	}
 	

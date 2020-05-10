@@ -18,6 +18,7 @@ package ch.binding.beacon.hci;
 import java.util.Arrays;
 
 import ch.binding.beacon.ContactDetectionService;
+import ch.binding.beacon.dp3t.DP3T_ContactDetectionService;
 
 public class LE_AdvertisingReport extends LE_MetaEvent {
 	
@@ -254,10 +255,12 @@ public class LE_AdvertisingReport extends LE_MetaEvent {
 		 */
 		public ADV_NONCONN_IND_Report parse() {
 			final byte data[] = this.advData;
-			
-			
+						
 			final byte serviceUUID_MSB = (byte) ((ContactDetectionService.CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF);
 			final byte serviceUUID_LSB = (byte) ((ContactDetectionService.CONTACT_DETECTION_SERVICE_UUID) & 0xFF);
+			
+			final byte dp3tUUID_MSB = (byte) ((DP3T_ContactDetectionService.CONTACT_DETECTION_SERVICE_UUID >> 8) & 0xFF);
+			final byte dp3tUUID_LSB = (byte) ((DP3T_ContactDetectionService.CONTACT_DETECTION_SERVICE_UUID) & 0xFF);
 			
 			// https://blog.google/documents/58/Contact_Tracing_-_Bluetooth_Specification_v1.1_RYGZbKW.pdf
 			if ( (byte) data[0] == 0x02 &&  // length Flags
@@ -266,10 +269,20 @@ public class LE_AdvertisingReport extends LE_MetaEvent {
 				 (byte) data[3] == 0x03 &&  // length Service UUID
 				 (byte) data[4] == 0x03 &&  // type Service UUID
 				 // service UUID value, LSB byte order...
-				 (byte) (data[5] & 0xFF) == serviceUUID_MSB &&
-				 (byte) (data[6] & 0xFF) == serviceUUID_LSB
+				 (byte) (data[5] & 0xFF) == serviceUUID_LSB &&
+				 (byte) (data[6] & 0xFF) == serviceUUID_MSB
 				 ) {
 				return new ContactDetectionServiceReport( this);
+			} else if ( (byte) data[0] == 0x02 &&  // length Flags
+					 (byte) data[1] == 0x01 &&  // type Flags
+					 (byte) data[2] == 0x1A &&  // value Flags
+					 (byte) data[3] == 0x03 &&  // length Service UUID
+					 (byte) data[4] == 0x03 &&  // type Service UUID
+					 // service UUID value, LSB byte order...
+					 (byte) (data[5] & 0xFF) == dp3tUUID_LSB &&
+					 (byte) (data[6] & 0xFF) == dp3tUUID_MSB
+					 ) {
+					return new DP3TServiceReport( this);
 			}
 			
 			return this;						
@@ -315,6 +328,14 @@ public class LE_AdvertisingReport extends LE_MetaEvent {
 			return sb.toString();
 		}
 					
+	}
+	
+	public static class DP3TServiceReport extends ADV_NONCONN_IND_Report {
+		
+		DP3TServiceReport(ADV_NONCONN_IND_Report advRep) {
+			super(advRep);			
+		}
+		
 	}
 	
 	// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 6, Part B, page 2875
