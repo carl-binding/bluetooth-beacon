@@ -5,12 +5,22 @@ import java.util.Arrays;
 public class EphId {
 	
 	private byte[] data;
+	
+	/**
+	* if != 0, index of interval against start-of-day (scheme 1)
+	* if != 0, index of interval against UNIX EPOCH (scheme 2)
+	* */
 	private long epoch = 0;
 
 	public EphId(byte[] data) {
 		this.data = data;
 	}
 	
+	/**
+	 * 
+	 * @param data
+	 * @param epoch interval against start-of-day (scheme 1) or against UNIX EPOCH (scheme 2).
+	 */
 	public EphId( byte [] data, long epoch) {
 		super();
 		this.data = data;

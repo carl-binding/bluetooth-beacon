@@ -291,6 +291,30 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 	}
 	
 	/***
+	 * 
+	 * @param s hexadecimal string, 2 hex digits per byte. no space.
+	 * @return byte-array
+	 */
+	public static byte[] hexStrToBytes( String s) {
+		if ( s == null) {  
+			throw new IllegalArgumentException();
+		}
+		
+		final int sl = s.length();
+		if ( sl == 0 || sl % 2 != 0) {
+			throw new IllegalArgumentException();
+		}
+		
+		final byte b[] = new byte[sl/2];
+		for ( int i = 0; i < b.length; i++) {
+			final String ss = s.substring( i*2, (i+1)*2);
+			final int j = Integer.parseInt( ss, 0x10);
+			b[i] = (byte) (j & 0xFF);
+		}
+		return b;
+	}
+	
+	/***
 	 * converts a 16 byte array into a hex-dec string
 	 * @param rollingProxyID
 	 * @param msb most-significant byte first or last (MSB vs LSB)
@@ -1736,7 +1760,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 			}
 			
 			try {
-				byte [] metadataKey = Crypto.getAssociatedEncryptedMetadataKey( null);
+				byte [] metadataKey = Crypto.getAssociatedEncryptedMetadataKey( null, -1);
 				
 				byte [] metadata = "some metadata".getBytes( "UTF-8");
 				
@@ -1762,7 +1786,7 @@ public class Beacon implements HCI_PDU_Handler, HCI_EventHandler {
 		try {
 			Beacon beacon = new Beacon( pwd);
 			
-			boolean TEST_PARSER = false;
+			boolean TEST_PARSER = true;
 			
 			if ( TEST_PARSER) {
 				try {

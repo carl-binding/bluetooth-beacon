@@ -16,6 +16,7 @@
 package ch.binding.beacon;
 
 import java.util.Date;
+import java.util.HashMap;
 
 /***
  * interface to handle the storage of proximity ID tokens detected on that device.
@@ -60,6 +61,48 @@ public interface ProximityIDStore {
 	 */
 	public boolean purgeEphemeralEncounters( long duration, Date before);
 	
+	/**
+	 * the info we stored away during scanning.
+	 * 
+	 * @author carl
+	 *
+	 */
+	public static class ProximityID {
+		
+		/***
+		 * 
+		 * @param proximity_id hex-dec digit string of 16 bytes
+		 * @param assoc_enc_meta_data hex-dec digit string of 4 bytes
+		 * @param first_toc
+		 * @param last_toc
+		 * @param rssi
+		 */
+		public ProximityID( String proximity_id, String assoc_enc_meta_data, long first_toc, long last_toc,
+				int rssi) {
+			super();
+			
+			// for whatever reason, we stored these values as hex-dec strings, which is what BLE and hcitools 
+			// prefer....
+			assert( proximity_id.length() == 2 * Beacon.ROLLING_PROXY_ID_LENGTH);
+			assert( assoc_enc_meta_data.length() == 2 * Beacon.ASSOCIATED_META_DATA_LENGTH);
+			
+			this.proximityID = Beacon.hexStrToBytes( proximity_id);
+			this.encodedAssocMetaData = Beacon.hexStrToBytes( assoc_enc_meta_data);
+			
+			this.rssi = rssi;
+			this.first_toc = first_toc;
+			this.last_toc = last_toc;
+		}
+		
+		public long first_toc;
+		public long last_toc;
+		public int rssi;
+		public byte proximityID[];
+		public byte encodedAssocMetaData[];
 	
+	}
+	
+	public HashMap<ByteArray, ProximityID> getProximityIDs( long from_ts, long to_ts);
+		
 
 }

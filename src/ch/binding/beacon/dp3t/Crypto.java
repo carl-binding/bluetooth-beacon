@@ -4,12 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -18,6 +20,8 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+
+import ch.binding.beacon.dp3t.SQLiteEphIDMatcher.Match;
 
 public class Crypto {
 	
@@ -36,7 +40,7 @@ public class Crypto {
 	/***
 	 * quarter hours
 	 */
-	private static final int NUMBER_OF_EPOCHS_PER_DAY = 24 * 4;
+	public static final int NUMBER_OF_EPOCHS_PER_DAY = 24 * 4;
 	
 	public static final int MILLISECONDS_PER_EPOCH = (int) (ONE_DAY_MS / NUMBER_OF_EPOCHS_PER_DAY);
 
@@ -51,7 +55,7 @@ public class Crypto {
 	 * 
 	 * @return day nbr since UNIX EPOCH
 	 */
-	public static int getDayNumber( long ts_msec) {
+	static int getDayNumber( long ts_msec) {
 		long dn = (ts_msec / ONE_DAY_MS);
 		return (int) dn;
 	}
@@ -88,7 +92,7 @@ public class Crypto {
 		}
 	}
 	
-	private static byte[] getNewRandomKey() throws NoSuchAlgorithmException {
+	static byte[] getNewRandomKey() throws NoSuchAlgorithmException {
 		KeyGenerator keyGenerator = KeyGenerator.getInstance("HmacSHA256");
 		SecretKey secretKey = keyGenerator.generateKey();
 		return secretKey.getEncoded();
@@ -100,7 +104,7 @@ public class Crypto {
 	 * @param SKt0 today's key
 	 * @return tomorrow's key
 	 */
-	private static byte[] getSKt1(byte[] SKt0) {
+	 static byte[] getSKt1(byte[] SKt0) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
 			byte[] SKt1 = digest.digest(SKt0);
@@ -134,7 +138,7 @@ public class Crypto {
 		return r;	
 	}
 	
-	public static byte[] getSecretKeyOfDay( int dayNbr) {
+	static byte[] getSecretKeyOfDay( int dayNbr) {
 		
 		if ( dayNbr <= 0) {
 			throw new IllegalArgumentException( "dayNbr < 0");
@@ -178,26 +182,41 @@ public class Crypto {
 		return null;
 	}
 	
-	private static long getStartOfDay( long ts) {
+	/**
+	 * 
+	 * @param ts time-stamp, msecs
+	 * @return start-of-day, msecs
+	 */
+	static long getStartOfDay( long ts) {
 		long ll =  ts - (ts % ONE_DAY_MS);
 		assert( ll % ONE_DAY_MS == 0);
 		return ll;
 	}
 	
-	private static int getEpochCounter(long time) {
+	/**
+	 * 
+	 * @param time time-stamp, msecs
+	 * @return epoch on day corresponding to time-stamp
+	 */
+	static int getEpochCounter(long time) {
 		return (int) (time - getStartOfDay( time)) / MILLISECONDS_PER_EPOCH;
 	}
 
-	public static long getCurrentEpochStart() {
+	static long getCurrentEpochStart() {
 		long now = System.currentTimeMillis();
 		return getEpochStart(now);
 	}
 
-	public static long getEpochStart(long time) {
+	/**
+	 * 
+	 * @param time, time-stamp, msecs
+	 * @return time-stamp of epoch start, msecs
+	 */
+	static long getEpochStart(long time) {
 		return getStartOfDay( time) + getEpochCounter(time) * MILLISECONDS_PER_EPOCH;
 	}
 
-	private static List<EphId> createEphIds(byte[] SK, boolean shuffle) {
+	static List<EphId> createEphIds(byte[] SK, boolean shuffle) {
 		
 		// System.err.println( Base64.getEncoder().encodeToString(SK));
 		
@@ -251,54 +270,8 @@ public class Crypto {
 		return ephIds.get( epochNbr);
 	}
 
-	/***
-	 * 
-	 * @param sk secret-key with day-number in past, but less than nbr of days data is is kept, or today.
-	 * @param matcher call-back to match ephemeral IDs
-	 * 
-	 * @return true if a match is found.
-	 */
-	public static boolean match( ch.binding.beacon.dp3t.SecretKey sk,
-			EphIdMatcher matcher) {
-		
-		if ( matcher == null)
-			matcher = (SQLKeyStore) Crypto.keyStore;
-		
-		if ( sk == null) {
-			throw new IllegalArgumentException();
-		}
-		
-		final long today = getDayNumber( getStartOfDay( System.currentTimeMillis()));
-		
-		if ( sk.getDayNbr() > today) {
-			throw new IllegalArgumentException( "dayNbr into the future?");
-		}
-		
-		if ( today - NUMBER_OF_DAYS_TO_KEEP_DATA > sk.getDayNbr()) {
-			throw new IllegalArgumentException( "dayNbr too far in the past");
-		}
-		
-		for ( int d = sk.getDayNbr(); d <= today; d++) {
-			
-			// ephIds are not stored...
-			List<EphId> ephIds = createEphIds( sk.getKey(), false);
-			
-			for ( EphId ephId: ephIds) {
-				if ( matcher.matches( ephId, d)) {
-					return true;
-				}
-			}
-			
-			if ( d == today)
-				break;
-			
-			// get next-day's key
-			final byte [] nextKey = getSKt1( sk.getKey());
-			sk = new ch.binding.beacon.dp3t.SecretKey( d+1, nextKey);			
-		}
-		
-		return false;		
-	}
+	
+	private static final int NBR_KEYS = 1000;
 	
 	public static void main(String[] args) {
 		
@@ -312,18 +285,57 @@ public class Crypto {
 		
 		int tomorrow = Crypto.getDayNumber( now + ONE_DAY_MS);
 		byte[] sk2 = Crypto.getSecretKeyOfDay( tomorrow);
-		
-		boolean haveMatches = Crypto.match( new ch.binding.beacon.dp3t.SecretKey( today, sk), null);
-		
+				
 		KeyStore keyStore = Crypto.keyStore;
 		
 		keyStore.storeForeignEphId( ephId, -50, now+10*1000);
 		
-		if ( Crypto.match( new ch.binding.beacon.dp3t.SecretKey( today, sk), null)) {
-			System.out.println( "match OK") ;
-		} else {
-			System.out.println( "match FAILED");
+		SQLiteEphIDMatcher matcher = new SQLiteEphIDMatcher();
+		ArrayList<ch.binding.beacon.dp3t.SecretKey> infectiousKeys = new ArrayList<ch.binding.beacon.dp3t.SecretKey>();
+		infectiousKeys.add( new ch.binding.beacon.dp3t.SecretKey( today, sk));
+		
+		List<Match> matches = matcher.matches( infectiousKeys);	
+		
+		infectiousKeys = new ArrayList<ch.binding.beacon.dp3t.SecretKey>();
+		
+		// build a list of keys
+		for ( int i = 0; i < NBR_KEYS; i++) {
+			int d = today-3;
+			try {
+				sk = Crypto.getNewRandomKey();
+			} catch (NoSuchAlgorithmException e) {
+				e.printStackTrace();
+				System.exit( -1);
+			}
+			
+			ch.binding.beacon.dp3t.SecretKey ssk = new ch.binding.beacon.dp3t.SecretKey( d, sk);
+			infectiousKeys.add(  ssk);
+			
+			System.out.println( "new key generated...");
+			
+			// for every key create ephemerous IDs. we get a list of 96 here
+			List<EphId> ephIDs = createEphIds( ssk.getKey(), false);
+			
+			// pick one eph-id from list
+			int epochOfDay = (int) (Math.random() * (NUMBER_OF_EPOCHS_PER_DAY-1)); // 15;
+			long ts = (d * ONE_DAY_MS) + epochOfDay * MILLISECONDS_PER_EPOCH;
+			keyStore.storeForeignEphId( ephIDs.get( epochOfDay), -50, ts);
+			
+			// and one more
+			keyStore.storeForeignEphId( ephIDs.get( epochOfDay+1), -50, ts+MILLISECONDS_PER_EPOCH);
+			
+			System.out.println( "eph id stored...");
+			
 		}
+		
+		String timeStamp = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss").format(new Date());
+		System.out.println( timeStamp);
+		
+		// now see if we get matches...
+		matches = matcher.matches( infectiousKeys);
+		
+		timeStamp = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss").format(new Date());
+		System.out.println( timeStamp);
 		
 	}
 }

@@ -11,7 +11,7 @@ import java.util.List;
 
 import ch.binding.beacon.dp3t.KeyStore;
 
-public class SQLKeyStore implements KeyStore, EphIdMatcher {
+public class SQLKeyStore implements KeyStore {
 	
 	
 	private String dbURL = "jdbc:sqlite:/home/carl/workspace/beacon/sqlite/dp3t.db";
@@ -235,43 +235,7 @@ public class SQLKeyStore implements KeyStore, EphIdMatcher {
 
 	}
 
-	@Override
-	public boolean matches(EphId ephId, int dayNbr) {
-		
-		final String select_stmt = "select * from foreign_eph_ids where (day_nbr = ?) and (eph_id = ?)";
-		final String ephIdStr = Base64.getEncoder().encodeToString( ephId.getData());
-		
-		try ( Connection conn = this.connect();
-		          PreparedStatement pstmt  = conn.prepareStatement( select_stmt);
-					){
-		            
-            // set the value
-            pstmt.setInt( 1, dayNbr);
-            pstmt.setString( 2,  ephIdStr);
-            // execute query
-            ResultSet rs  = pstmt.executeQuery();
-            
-            int count = 0;
-            long last_toc = 0;
-            int dbRssi = 0;
-            
-            // loop through the result set
-            while (rs.next()) {
-            	count++;
-            	last_toc = rs.getLong( "last_toc");
-            	dbRssi = rs.getInt( "rssi");
-            }
-           
-           return count > 0;
-           
-        } catch (SQLException e) {
-            e.printStackTrace();
-      
-        } finally {
-        }
-		
-		return false;
-	}
+	
 
 	private static final long ONE_SEC = 1000; 
 	

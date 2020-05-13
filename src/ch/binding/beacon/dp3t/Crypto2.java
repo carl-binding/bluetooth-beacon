@@ -28,6 +28,11 @@ public class Crypto2 {
 	
 	public static final int MILLISECONDS_PER_EPOCH = (int) (ONE_DAY_MS / NUMBER_OF_EPOCHS_PER_DAY);
 	
+	/**
+	 * 
+	 * @param ts_msec time-stamp, msecs
+	 * @return epoch index against UNIX Epoch.
+	 */
 	public static final long getEpoch( long ts_msec) {
 		return (ts_msec / MILLISECONDS_PER_EPOCH);
 	}
@@ -105,10 +110,23 @@ public class Crypto2 {
 		
 	}
 
+	/**
+	 * 
+	 * @param seed
+	 * @param epoch interval index against UNIX EPOCH.
+	 * @return ephemerous ID
+	 * @throws NoSuchAlgorithmException
+	 */
 	public static EphId getEphId( byte [] seed, long epoch) throws NoSuchAlgorithmException {
 		return new EphId( Crypto2.truncate128( Crypto2.hash( seed)), epoch);
 	}
 	
+	/**
+	 * 
+	 * @param ts_msec, time-stamp, msecs
+	 * @return ephemerous ID for given time-stamp
+	 * @throws NoSuchAlgorithmException
+	 */
 	public static EphId getEphId( long ts_msec) throws NoSuchAlgorithmException {
 		final long epoch = Crypto2.getEpoch( ts_msec);
 		final byte seed[] = getSeed( epoch);

@@ -22,9 +22,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.logging.Logger;
 
 import ch.binding.beacon.Beacon;
+import ch.binding.beacon.ByteArray;
 import ch.binding.beacon.ProximityIDStore;
 
 /***
@@ -64,7 +66,9 @@ public class SQLiteIDStore implements ProximityIDStore {
         return conn;
     }
 
-	
+	/**
+	 * note that service data is a string of hex-decimal digits, 2 hex-dec digits per byte.
+	 */
 	@Override
 	public boolean store(String serviceData, int rssi, Date timeOfCapture) {
 		if ( serviceData == null || serviceData.length() != SERVICE_DATA_LEN) {
@@ -189,6 +193,55 @@ public class SQLiteIDStore implements ProximityIDStore {
 		}
 		
 		return true;
+	}
+
+	@Override
+	public HashMap<ByteArray, ProximityID> getProximityIDs(long from_ts, long to_ts) {
+		
+		// System.err.println( String.format( "select * from Encounters where (first_toc >= %d) and (last_toc <= %d)", from_ts, to_ts));
+		
+		final String select_stmt = "select * from Encounters where (first_toc >= ?) and (last_toc <= ?)";
+		
+		try ( Connection conn = this.connect();
+				PreparedStatement pstmt  = conn.prepareStatement( select_stmt);
+				){
+
+			// set the value
+			pstmt.setLong( 1, from_ts);
+			pstmt.setLong( 2, to_ts);
+			// execute query
+			ResultSet rs  = pstmt.executeQuery();
+
+			int count = 0;
+
+			HashMap<ByteArray, ProximityID> lkupTbl = new HashMap<ByteArray, ProximityID>();
+
+			// loop through the result set
+			while (rs.next()) {
+				count++;
+
+				final long first_toc = rs.getLong( "first_toc");
+				final long last_toc = rs.getLong( "last_toc");
+				// these are hex-dec digit strings, not base64....
+				final String assoc_enc_meta_data = rs.getString( "assoc_enc_meta_data");
+				final String proximity_id = rs.getString( "proximity_id");
+				final int rssi = rs.getInt( "rssi");
+
+				final ProximityID pid = new ProximityID(  proximity_id,  assoc_enc_meta_data,  first_toc,  last_toc, rssi);
+
+				lkupTbl.put( new ByteArray( pid.proximityID), pid);	            	
+			}
+
+			if ( lkupTbl.isEmpty()) 
+				return null;
+
+			return lkupTbl;
+
+		} catch (SQLException e) {
+			e.printStackTrace();
+		} finally {
+		}
+		return null;
 	}
 
 }
